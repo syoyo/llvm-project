@@ -18,5 +18,6 @@ jobs:
           git fetch upstream
           git checkout master
 
+          # TODO: Investigate why `--allow-unrelated-histories` required.
           # TODO: Only push there is a change
-          git pull upstream master && git push origin master
+          git pull upstream master --allow-unrelated-histories && git push origin master
