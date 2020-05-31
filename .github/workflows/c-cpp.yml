@@ -17,10 +17,10 @@ jobs:
     - name: apt and setup
       run: |
         sudo apt-get install -y ninja-build lld-9 clang++-9 clang-9
-        update-alternatives --install "/usr/bin/clang" "clang" "/usr/bin/clang-9" 10
-        update-alternatives --install "/usr/bin/clang++" "clang++" "/usr/bin/clang++-9" 10
-        update-alternatives --install "/usr/bin/ld.lld" "ld.lld" "/usr/bin/ld.lld-9" 10
-        update-alternatives --install "/usr/bin/lld" "lld" "/usr/bin/lld-9" 10
+        sudo update-alternatives --install "/usr/bin/clang" "clang" "/usr/bin/clang-9" 10
+        sudo update-alternatives --install "/usr/bin/clang++" "clang++" "/usr/bin/clang++-9" 10
+        sudo update-alternatives --install "/usr/bin/ld.lld" "ld.lld" "/usr/bin/ld.lld-9" 10
+        sudo update-alternatives --install "/usr/bin/lld" "lld" "/usr/bin/lld-9" 10
     - name: cmake bootstrap 
       run: ./scripts/bootstrap-mlir.sh
     - name: make
