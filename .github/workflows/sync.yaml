@@ -1,8 +1,8 @@
-name: Sync Fork
+name: sync with upstream
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/5 * * * *'
 
 jobs:
   sync:
@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: TG908/fork-sync@v1.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          owner: syoyo
-          base: master
-          head: master
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: sync
+        run: |
+          git remote add upstream https://github.com/llvm/llvm-project
+          git fetch upstream
+          git checkout master
+          # TODO: Only push there is a change
+          git merge upstream/master && git push origin master
