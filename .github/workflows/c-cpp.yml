@@ -14,6 +14,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: apt
+      run: |
+        sudo apt install -y ninja-build lld clang++ clang
     - name: cmake bootstrap 
       run: ./scripts/bootstrap-mlir.sh
     - name: make
