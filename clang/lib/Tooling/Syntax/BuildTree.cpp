@@ -608,6 +608,14 @@ public:
     return true;
   }
 
+  bool WalkUpFromCXXNullPtrLiteralExpr(CXXNullPtrLiteralExpr *S) {
+    Builder.markChildToken(S->getLocation(),
+                           syntax::NodeRole::CxxNullPtrExpression_keyword);
+    Builder.foldNode(Builder.getExprRange(S),
+                     new (allocator()) syntax::CxxNullPtrExpression, S);
+    return true;
+  }
+
   bool WalkUpFromUnaryOperator(UnaryOperator *S) {
     Builder.markChildToken(
         S->getOperatorLoc(),
@@ -1044,17 +1052,18 @@ void syntax::TreeBuilder::markStmtChild(Stmt *Child, NodeRole Role) {
   if (!Child)
     return;
 
-  syntax::Tree *ChildNode = Mapping.find(Child);
-  assert(ChildNode != nullptr);
-
-  // This is an expression in a statement position, consume the trailing
-  // semicolon and form an 'ExpressionStatement' node.
-  if (isa<Expr>(Child)) {
-    setRole(ChildNode, NodeRole::ExpressionStatement_expression);
+  syntax::Tree *ChildNode;
+  if (Expr *ChildExpr = dyn_cast<Expr>(Child)) {
+    // This is an expression in a statement position, consume the trailing
+    // semicolon and form an 'ExpressionStatement' node.
+    markExprChild(ChildExpr, NodeRole::ExpressionStatement_expression);
     ChildNode = new (allocator()) syntax::ExpressionStatement;
     // (!) 'getStmtRange()' ensures this covers a trailing semicolon.
     Pending.foldChildren(Arena, getStmtRange(Child), ChildNode);
+  } else {
+    ChildNode = Mapping.find(Child);
   }
+  assert(ChildNode != nullptr);
   setRole(ChildNode, Role);
 }
 
