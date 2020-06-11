@@ -12,6 +12,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/ModuleSummaryAnalysis.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -571,7 +572,8 @@ template <typename CalleeTy> void resolveAllCalls(UseInfo<CalleeTy> &Use) {
 }
 
 GVToSSI createGlobalStackSafetyInfo(
-    std::map<const GlobalValue *, FunctionInfo<GlobalValue>> Functions) {
+    std::map<const GlobalValue *, FunctionInfo<GlobalValue>> Functions,
+    const ModuleSummaryIndex *Index) {
   GVToSSI SSI;
   if (Functions.empty())
     return SSI;
@@ -647,8 +649,8 @@ const StackSafetyGlobalInfo::InfoTy &StackSafetyGlobalInfo::getInfo() const {
         Functions.emplace(&F, std::move(FI));
       }
     }
-    Info.reset(
-        new InfoTy{createGlobalStackSafetyInfo(std::move(Functions)), {}});
+    Info.reset(new InfoTy{
+        createGlobalStackSafetyInfo(std::move(Functions), Index), {}});
     for (auto &FnKV : Info->Info) {
       for (auto &KV : FnKV.second.Allocas) {
         ++NumAllocaTotal;
@@ -665,11 +667,39 @@ const StackSafetyGlobalInfo::InfoTy &StackSafetyGlobalInfo::getInfo() const {
   return *Info;
 }
 
+// Converts a StackSafetyFunctionInfo to the relevant FunctionSummary
+// constructor fields
+std::vector<FunctionSummary::ParamAccess>
+StackSafetyInfo::getParamAccesses() const {
+  assert(needsParamAccessSummary(*F->getParent()));
+
+  std::vector<FunctionSummary::ParamAccess> ParamAccesses;
+  for (const auto &KV : getInfo().Info.Params) {
+    auto &PS = KV.second;
+    if (PS.Range.isFullSet())
+      continue;
+
+    ParamAccesses.emplace_back(KV.first, PS.Range);
+    FunctionSummary::ParamAccess &Param = ParamAccesses.back();
+
+    Param.Calls.reserve(PS.Calls.size());
+    for (auto &C : PS.Calls) {
+      if (C.Offset.isFullSet()) {
+        ParamAccesses.pop_back();
+        break;
+      }
+      Param.Calls.emplace_back(C.ParamNo, C.Callee->getGUID(), C.Offset);
+    }
+  }
+  return ParamAccesses;
+}
+
 StackSafetyGlobalInfo::StackSafetyGlobalInfo() = default;
 
 StackSafetyGlobalInfo::StackSafetyGlobalInfo(
-    Module *M, std::function<const StackSafetyInfo &(Function &F)> GetSSI)
-    : M(M), GetSSI(GetSSI) {
+    Module *M, std::function<const StackSafetyInfo &(Function &F)> GetSSI,
+    const ModuleSummaryIndex *Index)
+    : M(M), GetSSI(GetSSI), Index(Index) {
   if (StackSafetyRun)
     getInfo();
 }
@@ -743,11 +773,14 @@ AnalysisKey StackSafetyGlobalAnalysis::Key;
 
 StackSafetyGlobalInfo
 StackSafetyGlobalAnalysis::run(Module &M, ModuleAnalysisManager &AM) {
+  // FIXME: Lookup Module Summary.
   FunctionAnalysisManager &FAM =
       AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
-  return {&M, [&FAM](Function &F) -> const StackSafetyInfo & {
+  return {&M,
+          [&FAM](Function &F) -> const StackSafetyInfo & {
             return FAM.getResult<StackSafetyAnalysis>(F);
-          }};
+          },
+          nullptr};
 }
 
 PreservedAnalyses StackSafetyGlobalPrinterPass::run(Module &M,
@@ -779,9 +812,25 @@ void StackSafetyGlobalInfoWrapperPass::getAnalysisUsage(
 }
 
 bool StackSafetyGlobalInfoWrapperPass::runOnModule(Module &M) {
-  SSGI = {&M, [this](Function &F) -> const StackSafetyInfo & {
+  const ModuleSummaryIndex *ImportSummary = nullptr;
+  if (auto *IndexWrapperPass =
+          getAnalysisIfAvailable<ImmutableModuleSummaryIndexWrapperPass>())
+    ImportSummary = IndexWrapperPass->getIndex();
+
+  SSGI = {&M,
+          [this](Function &F) -> const StackSafetyInfo & {
             return getAnalysis<StackSafetyInfoWrapperPass>(F).getResult();
-          }};
+          },
+          ImportSummary};
+  return false;
+}
+
+bool llvm::needsParamAccessSummary(const Module &M) {
+  if (StackSafetyRun)
+    return true;
+  for (auto &F : M.functions())
+    if (F.hasFnAttribute(Attribute::SanitizeMemTag))
+      return true;
   return false;
 }
 
@@ -797,5 +846,6 @@ static const char GlobalPassName[] = "Stack Safety Analysis";
 INITIALIZE_PASS_BEGIN(StackSafetyGlobalInfoWrapperPass, DEBUG_TYPE,
                       GlobalPassName, false, true)
 INITIALIZE_PASS_DEPENDENCY(StackSafetyInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(ImmutableModuleSummaryIndexWrapperPass)
 INITIALIZE_PASS_END(StackSafetyGlobalInfoWrapperPass, DEBUG_TYPE,
                     GlobalPassName, false, true)

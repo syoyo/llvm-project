@@ -1,5 +1,4 @@
-// -*- C++ -*-
-//===----------------------------------------------------------------------===//
+//===-- Implementation header for roundf ------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,8 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-// FILE_DEPENDENCIES: test.pass.cpp
-// FILE_DEPENDENCIES: %s
+#ifndef LLVM_LIBC_SRC_MATH_ROUNDF_H
+#define LLVM_LIBC_SRC_MATH_ROUNDF_H
 
-// RUN: echo %{file_dependencies} | grep 'test.pass.cpp'
-// RUN: echo %{file_dependencies} | grep '%s'
+namespace __llvm_libc {
+
+float roundf(float x);
+
+} // namespace __llvm_libc
+
+#endif // LLVM_LIBC_SRC_MATH_ROUNDF_H

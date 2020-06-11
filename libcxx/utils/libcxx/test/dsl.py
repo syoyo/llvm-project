@@ -33,7 +33,7 @@ def _executeScriptInternal(test, commands):
       self.isWindows = platform.system() == 'Windows'
       self.maxIndividualTestTime = 0
   litConfig = FakeLitConfig()
-  _, tmpBase = lit.TestRunner.getTempPaths(test)
+  _, tmpBase = libcxx.test.newformat._getTempPaths(test)
   execDir = os.path.dirname(test.getExecPath())
   if not os.path.exists(execDir):
     os.makedirs(execDir)
@@ -70,9 +70,9 @@ def sourceBuilds(config, source):
       "mkdir -p %T",
       "%{cxx} %s %{flags} %{compile_flags} %{link_flags} -o %t.exe"
     ]
-    commands = libcxx.test.newformat.parseScript(test, preamble=commands, fileDependencies=['%t.exe'])
+    commands = libcxx.test.newformat.parseScript(test, preamble=commands)
     out, err, exitCode, timeoutInfo = _executeScriptInternal(test, commands)
-    cleanup = libcxx.test.newformat.parseScript(test, preamble=['rm %t.exe'], fileDependencies=[])
+    cleanup = libcxx.test.newformat.parseScript(test, preamble=['rm %t.exe'])
     _executeScriptInternal(test, cleanup)
     return exitCode == 0
 
@@ -85,7 +85,7 @@ def hasCompileFlag(config, flag):
   """
   with _makeConfigTest(config) as test:
     commands = ["%{{cxx}} -xc++ {} -Werror -fsyntax-only %{{flags}} %{{compile_flags}} {}".format(os.devnull, flag)]
-    commands = libcxx.test.newformat.parseScript(test, preamble=commands, fileDependencies=[])
+    commands = libcxx.test.newformat.parseScript(test, preamble=commands)
     out, err, exitCode, timeoutInfo = _executeScriptInternal(test, commands)
     return exitCode == 0
 
@@ -111,9 +111,9 @@ def hasLocale(config, locale):
       "%{cxx} %s %{flags} %{compile_flags} %{link_flags} -o %t.exe",
       "%{{exec}} %t.exe {}".format(pipes.quote(locale)),
     ]
-    commands = libcxx.test.newformat.parseScript(test, preamble=commands, fileDependencies=['%t.exe'])
+    commands = libcxx.test.newformat.parseScript(test, preamble=commands)
     out, err, exitCode, timeoutInfo = _executeScriptInternal(test, commands)
-    cleanup = libcxx.test.newformat.parseScript(test, preamble=['rm %t.exe'], fileDependencies=[])
+    cleanup = libcxx.test.newformat.parseScript(test, preamble=['rm %t.exe'])
     _executeScriptInternal(test, cleanup)
     return exitCode == 0
 
@@ -129,7 +129,7 @@ def compilerMacros(config, flags=''):
   """
   with _makeConfigTest(config) as test:
     commands = ["%{{cxx}} -xc++ {} -dM -E %{{flags}} %{{compile_flags}} {}".format(os.devnull, flags)]
-    commands = libcxx.test.newformat.parseScript(test, preamble=commands, fileDependencies=[])
+    commands = libcxx.test.newformat.parseScript(test, preamble=commands)
     unparsedOutput, err, exitCode, timeoutInfo = _executeScriptInternal(test, commands)
     parsedMacros = dict()
     defines = (l.strip() for l in unparsedOutput.split('\n') if l.startswith('#define '))
@@ -250,15 +250,22 @@ class Parameter(object):
   Represents a parameter of a Lit test suite.
 
   Parameters are used to customize the behavior of test suites in a user
-  controllable way, more specifically by passing `--param <KEY>=<VALUE>`
-  when running Lit. Parameters have multiple possible values, and they can
-  have a default value when left unspecified.
+  controllable way. There are two ways of setting the value of a Parameter.
+  The first one is to pass `--param <KEY>=<VALUE>` when running Lit (or
+  equivalenlty to set `litConfig.params[KEY] = VALUE` somewhere in the
+  Lit configuration files. This method will set the parameter globally for
+  all test suites being run.
 
-  Parameters can have a Feature associated to them, in which case the Feature
-  is added to the TestingConfig if the parameter is enabled. It is an error if
-  the Parameter is enabled but the Feature associated to it is not supported,
-  for example trying to set the compilation standard to C++17 when `-std=c++17`
-  is not supported by the compiler.
+  The second method is to set `config.KEY = VALUE` somewhere in the Lit
+  configuration files, which sets the parameter only for the test suite(s)
+  that use that `config` object.
+
+  Parameters can have multiple possible values, and they can have a default
+  value when left unspecified. They can also have a Feature associated to them,
+  in which case the Feature is added to the TestingConfig if the parameter is
+  enabled. It is an error if the Parameter is enabled but the Feature associated
+  to it is not supported, for example trying to set the compilation standard to
+  C++17 when `-std=c++17` is not supported by the compiler.
 
   One important point is that Parameters customize the behavior of the test
   suite in a bounded way, i.e. there should be a finite set of possible choices
@@ -332,9 +339,10 @@ class Parameter(object):
     return self._name
 
   def getFeature(self, config, litParams):
-    param = litParams.get(self.name, None)
+    param = getattr(config, self.name, None)
+    param = litParams.get(self.name, param)
     if param is None and self._default is None:
-      raise ValueError("Parameter {} doesn't have a default value, but it was not specified in the Lit parameters".format(self.name))
+      raise ValueError("Parameter {} doesn't have a default value, but it was not specified in the Lit parameters or in the Lit config".format(self.name))
     getDefault = lambda: self._default(config) if callable(self._default) else self._default
     value = self._parse(param) if param is not None else getDefault()
     if value not in self._choices:
