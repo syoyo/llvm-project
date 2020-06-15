@@ -21346,13 +21346,14 @@ static bool matchScalarReduction(SDValue Op, ISD::NodeType BinOp,
   return true;
 }
 
-// Check whether an OR'd tree is PTEST-able.
+// Check whether an OR'd tree is PTEST-able, or if we can fallback to
+// CMP(MOVMSK(PCMPEQB(X,0))).
 static SDValue LowerVectorAllZeroTest(SDValue Op, ISD::CondCode CC,
                                       const X86Subtarget &Subtarget,
                                       SelectionDAG &DAG, SDValue &X86CC) {
   assert(Op.getOpcode() == ISD::OR && "Only check OR'd tree.");
 
-  if (!Subtarget.hasSSE41() || !Op->hasOneUse())
+  if (!Subtarget.hasSSE2() || !Op->hasOneUse())
     return SDValue();
 
   SmallVector<SDValue, 8> VecIns;
@@ -21365,9 +21366,11 @@ static SDValue LowerVectorAllZeroTest(SDValue Op, ISD::CondCode CC,
     return SDValue();
 
   SDLoc DL(Op);
-  MVT TestVT = VT.is128BitVector() ? MVT::v2i64 : MVT::v4i64;
+  bool UsePTEST = Subtarget.hasSSE41();
+  MVT TestVT =
+      VT.is128BitVector() ? (UsePTEST ? MVT::v2i64 : MVT::v16i8) : MVT::v4i64;
 
-  // Cast all vectors into TestVT for PTEST.
+  // Cast all vectors into TestVT for PTEST/PCMPEQ.
   for (unsigned i = 0, e = VecIns.size(); i < e; ++i)
     VecIns[i] = DAG.getBitcast(TestVT, VecIns[i]);
 
@@ -21382,7 +21385,16 @@ static SDValue LowerVectorAllZeroTest(SDValue Op, ISD::CondCode CC,
 
   X86CC = DAG.getTargetConstant(CC == ISD::SETEQ ? X86::COND_E : X86::COND_NE,
                                 DL, MVT::i8);
-  return DAG.getNode(X86ISD::PTEST, DL, MVT::i32, VecIns.back(), VecIns.back());
+
+  if (UsePTEST)
+    return DAG.getNode(X86ISD::PTEST, DL, MVT::i32, VecIns.back(),
+                       VecIns.back());
+
+  SDValue Result = DAG.getNode(X86ISD::PCMPEQ, DL, MVT::v16i8, VecIns.back(),
+                               getZeroVector(MVT::v16i8, Subtarget, DAG, DL));
+  Result = DAG.getNode(X86ISD::MOVMSK, DL, MVT::i32, Result);
+  return DAG.getNode(X86ISD::CMP, DL, MVT::i32, Result,
+                     DAG.getConstant(0xFFFF, DL, MVT::i32));
 }
 
 /// return true if \c Op has a use that doesn't just read flags.
@@ -22530,12 +22542,12 @@ SDValue X86TargetLowering::emitFlagsForSetcc(SDValue Op0, SDValue Op1,
       return BT;
   }
 
-  // Try to use PTEST for a tree ORs equality compared with 0.
+  // Try to use PTEST/PMOVMSKB for a tree ORs equality compared with 0.
   // TODO: We could do AND tree with all 1s as well by using the C flag.
   if (Op0.getOpcode() == ISD::OR && isNullConstant(Op1) &&
       (CC == ISD::SETEQ || CC == ISD::SETNE)) {
-    if (SDValue PTEST = LowerVectorAllZeroTest(Op0, CC, Subtarget, DAG, X86CC))
-      return PTEST;
+    if (SDValue CmpZ = LowerVectorAllZeroTest(Op0, CC, Subtarget, DAG, X86CC))
+      return CmpZ;
   }
 
   // Try to lower using KORTEST or KTEST.
@@ -41954,6 +41966,17 @@ static SDValue PromoteMaskArithmetic(SDNode *N, SelectionDAG &DAG,
   }
 }
 
+unsigned convertIntLogicToFPLogicOpcode(unsigned Opcode) {
+  unsigned FPOpcode;
+  switch (Opcode) {
+  default: llvm_unreachable("Unexpected input node for FP logic conversion");
+  case ISD::AND: FPOpcode = X86ISD::FAND; break;
+  case ISD::OR:  FPOpcode = X86ISD::FOR;  break;
+  case ISD::XOR: FPOpcode = X86ISD::FXOR; break;
+  }
+  return FPOpcode;
+}
+
 /// If both input operands of a logic op are being cast from floating point
 /// types, try to convert this into a floating point logic node to avoid
 /// unnecessary moves from SSE to integer registers.
@@ -41978,16 +42001,43 @@ static SDValue convertIntLogicToFPLogic(SDNode *N, SelectionDAG &DAG,
         (Subtarget.hasSSE2() && N00Type == MVT::f64)))
     return SDValue();
 
-  unsigned FPOpcode;
-  switch (N->getOpcode()) {
-  default: llvm_unreachable("Unexpected input node for FP logic conversion");
-  case ISD::AND: FPOpcode = X86ISD::FAND; break;
-  case ISD::OR:  FPOpcode = X86ISD::FOR;  break;
-  case ISD::XOR: FPOpcode = X86ISD::FXOR; break;
-  }
-
+  unsigned FPOpcode = convertIntLogicToFPLogicOpcode(N->getOpcode());
   SDValue FPLogic = DAG.getNode(FPOpcode, DL, N00Type, N00, N10);
   return DAG.getBitcast(VT, FPLogic);
+}
+
+// Attempt to fold BITOP(MOVMSK(X),MOVMSK(Y)) -> MOVMSK(BITOP(X,Y))
+// to reduce XMM->GPR traffic.
+static SDValue combineBitOpWithMOVMSK(SDNode *N, SelectionDAG &DAG) {
+  unsigned Opc = N->getOpcode();
+  assert((Opc == ISD::OR || Opc == ISD::AND || Opc == ISD::XOR) &&
+         "Unexpected bit opcode");
+
+  SDValue N0 = N->getOperand(0);
+  SDValue N1 = N->getOperand(1);
+
+  // Both operands must be single use MOVMSK.
+  if (N0.getOpcode() != X86ISD::MOVMSK || !N0.hasOneUse() ||
+      N1.getOpcode() != X86ISD::MOVMSK || !N1.hasOneUse())
+    return SDValue();
+
+  SDValue Vec0 = N0.getOperand(0);
+  SDValue Vec1 = N1.getOperand(0);
+  EVT VecVT0 = Vec0.getValueType();
+  EVT VecVT1 = Vec1.getValueType();
+
+  // Both MOVMSK operands must be from vectors of the same size and same element
+  // size, but its OK for a fp/int diff.
+  if (VecVT0.getSizeInBits() != VecVT1.getSizeInBits() ||
+      VecVT0.getScalarSizeInBits() != VecVT1.getScalarSizeInBits())
+    return SDValue();
+
+  SDLoc DL(N);
+  unsigned VecOpc =
+      VecVT0.isFloatingPoint() ? convertIntLogicToFPLogicOpcode(Opc) : Opc;
+  SDValue Result =
+      DAG.getNode(VecOpc, DL, VecVT0, Vec0, DAG.getBitcast(VecVT0, Vec1));
+  return DAG.getNode(X86ISD::MOVMSK, DL, MVT::i32, Result);
 }
 
 /// If this is a zero/all-bits result that is bitwise-anded with a low bits
@@ -42335,6 +42385,9 @@ static SDValue combineAnd(SDNode *N, SelectionDAG &DAG,
   if (SDValue V = combineScalarAndWithMaskSetcc(N, DAG, Subtarget))
     return V;
 
+  if (SDValue R = combineBitOpWithMOVMSK(N, DAG))
+    return R;
+
   if (DCI.isBeforeLegalizeOps())
     return SDValue();
 
@@ -42681,6 +42734,9 @@ static SDValue combineOr(SDNode *N, SelectionDAG &DAG,
       }
     }
   }
+
+  if (SDValue R = combineBitOpWithMOVMSK(N, DAG))
+    return R;
 
   if (DCI.isBeforeLegalizeOps())
     return SDValue();
@@ -44694,6 +44750,9 @@ static SDValue combineXor(SDNode *N, SelectionDAG &DAG,
 
   if (SDValue Cmp = foldVectorXorShiftIntoCmp(N, DAG, Subtarget))
     return Cmp;
+
+  if (SDValue R = combineBitOpWithMOVMSK(N, DAG))
+    return R;
 
   if (DCI.isBeforeLegalizeOps())
     return SDValue();
