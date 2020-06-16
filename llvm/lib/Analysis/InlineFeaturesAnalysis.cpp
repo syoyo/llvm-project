@@ -1,4 +1,17 @@
-#include "llvm/Analysis/ML/InlineFeaturesAnalysis.h"
+//===- InlineFeaturesAnalysis.cpp - Feature extraction for ML Policies ----===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements an analysis extracting function features, which may be
+// used by ML-driven policies, for example.
+//
+//===----------------------------------------------------------------------===//
+
+#include "llvm/Analysis/InlineFeaturesAnalysis.h"
 #include "llvm/IR/Instructions.h"
 
 using namespace llvm;
