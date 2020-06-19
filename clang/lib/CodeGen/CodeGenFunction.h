@@ -3923,7 +3923,6 @@ public:
                                    QualType RTy);
   llvm::Value *EmitCMSEClearRecord(llvm::Value *V, llvm::ArrayType *ATy,
                                    QualType RTy);
-  llvm::Value *EmitCMSEClearFP16(llvm::Value *V);
 
   llvm::Value *EmitCommonNeonBuiltinExpr(unsigned BuiltinID,
                                          unsigned LLVMIntrinsic,
@@ -3956,6 +3955,7 @@ public:
   llvm::Type *SVEBuiltinMemEltTy(SVETypeFlags TypeFlags);
 
   SmallVector<llvm::Type *, 2> getSVEOverloadTypes(SVETypeFlags TypeFlags,
+                                                   llvm::Type *ReturnType,
                                                    ArrayRef<llvm::Value *> Ops);
   llvm::Type *getEltType(SVETypeFlags TypeFlags);
   llvm::ScalableVectorType *getSVEType(const SVETypeFlags &TypeFlags);
