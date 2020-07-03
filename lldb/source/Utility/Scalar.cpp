@@ -14,7 +14,7 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/lldb-types.h"
-
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallString.h"
 
 #include <cinttypes>
@@ -644,312 +644,61 @@ bool Scalar::MakeUnsigned() {
   return success;
 }
 
-signed char Scalar::SChar(char fail_value) const {
-  switch (m_type) {
-  case e_void:
+template <typename T> T Scalar::GetAs(T fail_value) const {
+  switch (GetCategory(m_type)) {
+  case Category::Void:
     break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<schar_t>(
-        (m_integer.sextOrTrunc(sizeof(schar_t) * 8)).getSExtValue());
-  case e_float:
-    return static_cast<schar_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<schar_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<schar_t>(
-        (ldbl_val.sextOrTrunc(sizeof(schar_t) * 8)).getSExtValue());
+  case Category::Integral:
+    if (IsSigned(m_type))
+      return m_integer.sextOrTrunc(sizeof(T) * 8).getSExtValue();
+    return m_integer.zextOrTrunc(sizeof(T) * 8).getZExtValue();
+  case Category::Float: {
+    llvm::APSInt result(sizeof(T) * 8, std::is_unsigned<T>::value);
+    bool isExact;
+    m_float.convertToInteger(result, llvm::APFloat::rmTowardZero, &isExact);
+    return result.getSExtValue();
+  }
   }
   return fail_value;
+}
+
+signed char Scalar::SChar(signed char fail_value) const {
+  return GetAs<signed char>(fail_value);
 }
 
 unsigned char Scalar::UChar(unsigned char fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<uchar_t>(
-        (m_integer.zextOrTrunc(sizeof(uchar_t) * 8)).getZExtValue());
-  case e_float:
-    return static_cast<uchar_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<uchar_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<uchar_t>(
-        (ldbl_val.zextOrTrunc(sizeof(uchar_t) * 8)).getZExtValue());
-  }
-  return fail_value;
+  return GetAs<unsigned char>(fail_value);
 }
 
 short Scalar::SShort(short fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<sshort_t>(
-        (m_integer.sextOrTrunc(sizeof(sshort_t) * 8)).getSExtValue());
-  case e_float:
-    return static_cast<sshort_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<sshort_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<sshort_t>(
-        (ldbl_val.sextOrTrunc(sizeof(sshort_t) * 8)).getSExtValue());
-  }
-  return fail_value;
+  return GetAs<short>(fail_value);
 }
 
 unsigned short Scalar::UShort(unsigned short fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<ushort_t>(
-        (m_integer.zextOrTrunc(sizeof(ushort_t) * 8)).getZExtValue());
-  case e_float:
-    return static_cast<ushort_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<ushort_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<ushort_t>(
-        (ldbl_val.zextOrTrunc(sizeof(ushort_t) * 8)).getZExtValue());
-  }
-  return fail_value;
+  return GetAs<unsigned short>(fail_value);
 }
 
-int Scalar::SInt(int fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<sint_t>(
-        (m_integer.sextOrTrunc(sizeof(sint_t) * 8)).getSExtValue());
-  case e_float:
-    return static_cast<sint_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<sint_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<sint_t>(
-        (ldbl_val.sextOrTrunc(sizeof(sint_t) * 8)).getSExtValue());
-  }
-  return fail_value;
-}
+int Scalar::SInt(int fail_value) const { return GetAs<int>(fail_value); }
 
 unsigned int Scalar::UInt(unsigned int fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<uint_t>(
-        (m_integer.zextOrTrunc(sizeof(uint_t) * 8)).getZExtValue());
-  case e_float:
-    return static_cast<uint_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<uint_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<uint_t>(
-        (ldbl_val.zextOrTrunc(sizeof(uint_t) * 8)).getZExtValue());
-  }
-  return fail_value;
+  return GetAs<unsigned int>(fail_value);
 }
 
-long Scalar::SLong(long fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<slong_t>(
-        (m_integer.sextOrTrunc(sizeof(slong_t) * 8)).getSExtValue());
-  case e_float:
-    return static_cast<slong_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<slong_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<slong_t>(
-        (ldbl_val.sextOrTrunc(sizeof(slong_t) * 8)).getSExtValue());
-  }
-  return fail_value;
-}
+long Scalar::SLong(long fail_value) const { return GetAs<long>(fail_value); }
 
 unsigned long Scalar::ULong(unsigned long fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<ulong_t>(
-        (m_integer.zextOrTrunc(sizeof(ulong_t) * 8)).getZExtValue());
-  case e_float:
-    return static_cast<ulong_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<ulong_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<ulong_t>(
-        (ldbl_val.zextOrTrunc(sizeof(ulong_t) * 8)).getZExtValue());
-  }
-  return fail_value;
+  return GetAs<unsigned long>(fail_value);
 }
 
 long long Scalar::SLongLong(long long fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<slonglong_t>(
-        (m_integer.sextOrTrunc(sizeof(slonglong_t) * 8)).getSExtValue());
-  case e_float:
-    return static_cast<slonglong_t>(m_float.convertToFloat());
-  case e_double:
-    return static_cast<slonglong_t>(m_float.convertToDouble());
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<slonglong_t>(
-        (ldbl_val.sextOrTrunc(sizeof(slonglong_t) * 8)).getSExtValue());
-  }
-  return fail_value;
+  return GetAs<long long>(fail_value);
 }
 
 unsigned long long Scalar::ULongLong(unsigned long long fail_value) const {
-  switch (m_type) {
-  case e_void:
-    break;
-  case e_sint:
-  case e_uint:
-  case e_slong:
-  case e_ulong:
-  case e_slonglong:
-  case e_ulonglong:
-  case e_sint128:
-  case e_uint128:
-  case e_sint256:
-  case e_uint256:
-  case e_sint512:
-  case e_uint512:
-    return static_cast<ulonglong_t>(
-        (m_integer.zextOrTrunc(sizeof(ulonglong_t) * 8)).getZExtValue());
-  case e_float:
-    return static_cast<ulonglong_t>(m_float.convertToFloat());
-  case e_double: {
-    double d_val = m_float.convertToDouble();
-    llvm::APInt rounded_double =
-        llvm::APIntOps::RoundDoubleToAPInt(d_val, sizeof(ulonglong_t) * 8);
-    return static_cast<ulonglong_t>(
-        (rounded_double.zextOrTrunc(sizeof(ulonglong_t) * 8)).getZExtValue());
-  }
-  case e_long_double:
-    llvm::APInt ldbl_val = m_float.bitcastToAPInt();
-    return static_cast<ulonglong_t>(
-        (ldbl_val.zextOrTrunc(sizeof(ulonglong_t) * 8)).getZExtValue());
-  }
-  return fail_value;
+  return GetAs<unsigned long long>(fail_value);
 }
 
-llvm::APInt Scalar::SInt128(llvm::APInt &fail_value) const {
+llvm::APInt Scalar::SInt128(const llvm::APInt &fail_value) const {
   switch (m_type) {
   case e_void:
     break;
@@ -1004,18 +753,21 @@ float Scalar::Float(float fail_value) const {
   case e_void:
     break;
   case e_sint:
-  case e_uint:
   case e_slong:
-  case e_ulong:
   case e_slonglong:
-  case e_ulonglong:
   case e_sint128:
-  case e_uint128:
   case e_sint256:
-  case e_uint256:
   case e_sint512:
+    return llvm::APIntOps::RoundSignedAPIntToFloat(m_integer);
+
+  case e_uint:
+  case e_ulong:
+  case e_ulonglong:
+  case e_uint128:
+  case e_uint256:
   case e_uint512:
     return llvm::APIntOps::RoundAPIntToFloat(m_integer);
+
   case e_float:
     return m_float.convertToFloat();
   case e_double:
@@ -1032,18 +784,21 @@ double Scalar::Double(double fail_value) const {
   case e_void:
     break;
   case e_sint:
-  case e_uint:
   case e_slong:
-  case e_ulong:
   case e_slonglong:
-  case e_ulonglong:
   case e_sint128:
-  case e_uint128:
   case e_sint256:
-  case e_uint256:
   case e_sint512:
+    return llvm::APIntOps::RoundSignedAPIntToDouble(m_integer);
+
+  case e_uint:
+  case e_ulong:
+  case e_ulonglong:
+  case e_uint128:
+  case e_uint256:
   case e_uint512:
     return llvm::APIntOps::RoundAPIntToDouble(m_integer);
+
   case e_float:
     return static_cast<double_t>(m_float.convertToFloat());
   case e_double:
@@ -1060,19 +815,23 @@ long double Scalar::LongDouble(long double fail_value) const {
   case e_void:
     break;
   case e_sint:
-  case e_uint:
   case e_slong:
-  case e_ulong:
   case e_slonglong:
-  case e_ulonglong:
   case e_sint128:
-  case e_uint128:
   case e_sint256:
-  case e_uint256:
   case e_sint512:
+    return static_cast<long_double_t>(
+        llvm::APIntOps::RoundSignedAPIntToDouble(m_integer));
+
+  case e_uint:
+  case e_ulong:
+  case e_ulonglong:
+  case e_uint128:
+  case e_uint256:
   case e_uint512:
     return static_cast<long_double_t>(
         llvm::APIntOps::RoundAPIntToDouble(m_integer));
+
   case e_float:
     return static_cast<long_double_t>(m_float.convertToFloat());
   case e_double:
