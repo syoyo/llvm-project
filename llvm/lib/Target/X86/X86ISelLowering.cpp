@@ -31800,8 +31800,8 @@ X86TargetLowering::EmitLoweredProbedAlloca(MachineInstr &MI,
 
   BuildMI(testMBB, DL,
           TII->get(TFI.Uses64BitFramePtr ? X86::CMP64rr : X86::CMP32rr))
-      .addReg(physSPReg)
-      .addReg(FinalStackPtr);
+      .addReg(FinalStackPtr)
+      .addReg(physSPReg);
 
   BuildMI(testMBB, DL, TII->get(X86::JCC_1))
       .addMBB(tailMBB)
@@ -40195,6 +40195,31 @@ static SDValue combineSelect(SDNode *N, SelectionDAG &DAG,
     }
   }
 
+  // If this is "((X & C) == 0) ? Y : Z" and C is a constant mask vector of
+  // single bits, then invert the predicate and swap the select operands.
+  // This can lower using a vector shift bit-hack rather than mask and compare.
+  if (DCI.isBeforeLegalize() && !Subtarget.hasAVX512() &&
+      N->getOpcode() == ISD::VSELECT && Cond.getOpcode() == ISD::SETCC &&
+      Cond.hasOneUse() && CondVT.getVectorElementType() == MVT::i1 &&
+      Cond.getOperand(0).getOpcode() == ISD::AND &&
+      isNullOrNullSplat(Cond.getOperand(1)) &&
+      cast<CondCodeSDNode>(Cond.getOperand(2))->get() == ISD::SETEQ &&
+      Cond.getOperand(0).getValueType() == VT) {
+    // The 'and' mask must be composed of power-of-2 constants.
+    // TODO: This is limited to splats because the availability/lowering of
+    //       non-uniform shifts and variable blend types is lumpy. Supporting
+    //       arbitrary power-of-2 vector constants will make the code more
+    //       complicated and may require target limitations to ensure that the
+    //       transform is profitable.
+    auto *C = isConstOrConstSplat(Cond.getOperand(0).getOperand(1));
+    if (C && C->getAPIntValue().isPowerOf2()) {
+      // vselect (X & C == 0), LHS, RHS --> vselect (X & C != 0), RHS, LHS
+      SDValue NotCond = DAG.getSetCC(DL, CondVT, Cond.getOperand(0),
+                                     Cond.getOperand(1), ISD::SETNE);
+      return DAG.getSelect(DL, VT, NotCond, RHS, LHS);
+    }
+  }
+
   return SDValue();
 }
 
@@ -42757,6 +42782,16 @@ static SDValue canonicalizeBitSelect(SDNode *N, SelectionDAG &DAG,
   }
 
   SDLoc DL(N);
+
+  if (UseVPTERNLOG) {
+    // Emit a VPTERNLOG node directly.
+    SDValue A = DAG.getBitcast(VT, N0.getOperand(1));
+    SDValue B = DAG.getBitcast(VT, N0.getOperand(0));
+    SDValue C = DAG.getBitcast(VT, N1.getOperand(0));
+    SDValue Imm = DAG.getTargetConstant(0xCA, DL, MVT::i8);
+    return DAG.getNode(X86ISD::VPTERNLOG, DL, VT, A, B, C, Imm);
+  }
+
   SDValue X = N->getOperand(0);
   SDValue Y =
       DAG.getNode(X86ISD::ANDNP, DL, VT, DAG.getBitcast(VT, N0.getOperand(1)),
