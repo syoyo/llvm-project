@@ -3284,7 +3284,8 @@ static Value *simplifyICmpWithMinMax(CmpInst::Predicate Pred, Value *LHS,
 static Value *simplifyICmpWithDominatingAssume(CmpInst::Predicate Predicate,
                                                Value *LHS, Value *RHS,
                                                const SimplifyQuery &Q) {
-  if (!Q.AC || !Q.CxtI)
+  // Gracefully handle instructions that have not been inserted yet.
+  if (!Q.AC || !Q.CxtI || !Q.CxtI->getParent())
     return nullptr;
 
   for (Value *AssumeBaseOp : {LHS, RHS}) {
@@ -4115,11 +4116,6 @@ static Value *SimplifySelectInst(Value *Cond, Value *TrueVal, Value *FalseVal,
 
   // select ?, X, X -> X
   if (TrueVal == FalseVal)
-    return TrueVal;
-
-  if (isa<UndefValue>(TrueVal))   // select ?, undef, X -> X
-    return FalseVal;
-  if (isa<UndefValue>(FalseVal))   // select ?, X, undef -> X
     return TrueVal;
 
   // Deal with partial undef vector constants: select ?, VecC, VecC' --> VecC''

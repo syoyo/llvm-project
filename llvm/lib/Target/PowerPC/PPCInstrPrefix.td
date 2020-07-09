@@ -1,3 +1,19 @@
+//===----------------------------------------------------------------------===//
+// PowerPC ISA 3.1 specific type constraints.
+//
+
+def SDT_PPCSplat32 : SDTypeProfile<1, 3, [ SDTCisVT<0, v2i64>,
+  SDTCisVec<1>, SDTCisInt<2>, SDTCisInt<3>
+]>;
+
+//===----------------------------------------------------------------------===//
+// ISA 3.1 specific PPCISD nodes.
+//
+
+def PPCxxsplti32dx : SDNode<"PPCISD::XXSPLTI32DX", SDT_PPCSplat32, []>;
+
+//===----------------------------------------------------------------------===//
+
 // PC Relative flag (for instructions that use the address of the prefix for
 // address computations).
 class isPCRel { bit PCRel = 1; }
@@ -732,8 +748,11 @@ let Predicates = [PrefixInstrs] in {
                                             (PPCxxspltidp i32:$IMM32))]>;
   def XXSPLTI32DX :
       8RR_DForm_IMM32_XT6_IX<32, 0, (outs vsrc:$XT),
-                             (ins vsrc:$XTi, i1imm:$IX, i32imm:$IMM32),
-                             "xxsplti32dx $XT, $IX, $IMM32", IIC_VecGeneral, []>,
+                             (ins vsrc:$XTi, u1imm:$IX, i32imm:$IMM32),
+                             "xxsplti32dx $XT, $IX, $IMM32", IIC_VecGeneral,
+                             [(set v2i64:$XT,
+                                   (PPCxxsplti32dx v2i64:$XTi, i32:$IX,
+                                                   i32:$IMM32))]>,
                              RegConstraint<"$XTi = $XT">, NoEncode<"$XTi">;
   def XXPERMX :
     8RR_XX4Form_IMM3_XTABC6<34, 0, (outs vsrc:$XT), (ins vsrc:$XA, vsrc:$XB,
@@ -775,8 +794,16 @@ let Predicates = [IsISA3_1] in {
                                       (int_ppc_altivec_vsrdbi v16i8:$VRA,
                                                               v16i8:$VRB, 
                                                               i32:$SH))]>;
-  def VINSW : VXForm_VRT5_UIM5_RB5_ins<207, "vinsw", []>;
-  def VINSD : VXForm_VRT5_UIM5_RB5_ins<463, "vinsd", []>;
+  def VINSW : 
+    VXForm_VRT5_UIM5_RB5_ins<207, "vinsw",
+                             [(set v4i32:$vD,
+                                   (int_ppc_altivec_vinsw v4i32:$vDi, i64:$rB,
+                                                          timm:$UIM))]>;
+  def VINSD :
+    VXForm_VRT5_UIM5_RB5_ins<463, "vinsd",
+                             [(set v2i64:$vD,
+                                   (int_ppc_altivec_vinsd v2i64:$vDi, i64:$rB,
+                                                          timm:$UIM))]>;
   def VINSBVLX :
     VXForm_VTB5_RA5_ins<15, "vinsbvlx",
                         [(set v16i8:$vD,

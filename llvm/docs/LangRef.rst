@@ -1252,6 +1252,12 @@ Currently, only the following parameter attributes are defined:
     only valid on intrinsic declarations and cannot be applied to a
     call site or arbitrary function.
 
+``noundef``
+    This attribute applies to parameters and return values. If the value
+    representation contains any undefined or poison bits, the behavior is
+    undefined. Note that this does not refer to padding introduced by the
+    type's storage representation.
+
 .. _gc:
 
 Garbage Collector Strategy Names
@@ -3657,6 +3663,11 @@ behavior. Notably this includes (but is not limited to):
 -  The condition operand of a :ref:`br <i_br>` instruction.
 -  The callee operand of a :ref:`call <i_call>` or :ref:`invoke <i_invoke>`
    instruction.
+-  The parameter operand of a :ref:`call <i_call>` or :ref:`invoke <i_invoke>`
+   instruction, when the function or invoking call site has a ``noundef``
+   attribute in the corresponding position.
+-  The operand of a :ref:`ret <i_ret>` instruction if the function or invoking
+   call site has a `noundef` attribute in the return value position.
 
 Here are some examples:
 
@@ -12102,6 +12113,65 @@ It is undefined behavior if this is called with a token from an
 '``llvm.call.preallocated.setup``' has already been called or if the
 preallocated call corresponding to the '``llvm.call.preallocated.setup``'
 has already been called.
+
+.. _int_call_preallocated_teardown:
+
+'``llvm.call.preallocated.teardown``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare i8* @llvm.call.preallocated.teardown(token %setup_token)
+
+Overview:
+"""""""""
+
+The '``llvm.call.preallocated.teardown``' intrinsic cleans up the stack
+created by a '``llvm.call.preallocated.setup``'.
+
+Semantics:
+""""""""""
+
+The token argument must be a '``llvm.call.preallocated.setup``'.
+
+The '``llvm.call.preallocated.teardown``' intrinsic cleans up the stack
+allocated by the corresponding '``llvm.call.preallocated.setup``'. Exactly
+one of this or the preallocated call must be called to prevent stack leaks.
+It is undefined behavior to call both a '``llvm.call.preallocated.teardown``'
+and the preallocated call for a given '``llvm.call.preallocated.setup``'.
+
+For example, if the stack is allocated for a preallocated call by a
+'``llvm.call.preallocated.setup``', then an initializer function called on an
+allocated argument throws an exception, there should be a
+'``llvm.call.preallocated.teardown``' in the exception handler to prevent
+stack leaks.
+
+Following the nesting rules in '``llvm.call.preallocated.setup``', nested
+calls to '``llvm.call.preallocated.setup``' and
+'``llvm.call.preallocated.teardown``' are allowed but must be properly
+nested.
+
+Example:
+""""""""
+
+.. code-block:: llvm
+
+        %cs = call token @llvm.call.preallocated.setup(i32 1)
+        %x = call i8* @llvm.call.preallocated.arg(token %cs, i32 0) preallocated(i32)
+        %y = bitcast i8* %x to i32*
+        invoke void @constructor(i32* %y) to label %conta unwind label %contb
+    conta:
+        call void @foo1(i32* preallocated(i32) %y) ["preallocated"(token %cs)]
+        ret void
+    contb:
+        %s = catchswitch within none [label %catch] unwind to caller
+    catch:
+        %p = catchpad within %s []
+        call void @llvm.call.preallocated.teardown(token %cs)
+        ret void
 
 Standard C Library Intrinsics
 -----------------------------
