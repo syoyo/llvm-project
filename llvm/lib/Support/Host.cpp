@@ -205,6 +205,8 @@ StringRef sys::detail::getHostCPUNameForARM(StringRef ProcCpuinfoContent) {
             .Case("0xd0a", "cortex-a75")
             .Case("0xd0b", "cortex-a76")
             .Case("0xd0d", "cortex-a77")
+            .Case("0xd41", "cortex-a78")
+            .Case("0xd44", "cortex-x1")
             .Case("0xd0c", "neoverse-n1")
             .Default("generic");
   }
@@ -1361,13 +1363,8 @@ int sys::getHostNumPhysicalCores() {
 bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   unsigned EAX = 0, EBX = 0, ECX = 0, EDX = 0;
   unsigned MaxLevel;
-  union {
-    unsigned u[3];
-    char c[12];
-  } text;
 
-  if (getX86CpuIDAndInfo(0, &MaxLevel, text.u + 0, text.u + 2, text.u + 1) ||
-      MaxLevel < 1)
+  if (getX86CpuIDAndInfo(0, &MaxLevel, &EBX, &ECX, &EDX) || MaxLevel < 1)
     return false;
 
   getX86CpuIDAndInfo(1, &EAX, &EBX, &ECX, &EDX);

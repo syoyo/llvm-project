@@ -5395,9 +5395,6 @@ def ext_typecheck_zero_array_size : Extension<
   "zero size arrays are an extension">, InGroup<ZeroLengthArray>;
 def err_typecheck_zero_array_size : Error<
   "zero-length arrays are not permitted in C++">;
-def warn_typecheck_zero_static_array_size : Warning<
-  "'static' has no effect on zero-length arrays">,
-  InGroup<ArrayBounds>;
 def err_array_size_non_int : Error<"size of array has non-integer type %0">;
 def err_init_element_not_constant : Error<
   "initializer element is not a compile-time constant">;
@@ -10064,6 +10061,8 @@ def err_omp_section_not_subset_of_array : Error<
   "array section must be a subset of the original array">;
 def err_omp_section_length_negative : Error<
   "section length is evaluated to a negative value %0">;
+def err_omp_section_stride_non_positive : Error<
+  "section stride is evaluated to a non-positive value %0">;
 def err_omp_section_length_undefined : Error<
   "section length is unspecified and cannot be inferred because subscripted value is %select{not an array|an array of unknown bound}0">;
 def err_omp_wrong_linear_modifier : Error<
