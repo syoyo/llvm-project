@@ -6,8 +6,6 @@
 // RUN:   | FileCheck %s --check-prefix=GET-LABEL-INFO
 // RUN: DFSAN_OPTIONS=fast16labels=1 not %run %t dfsan_has_label_with_desc \
 // RUN:   2>&1 | FileCheck %s --check-prefix=HAS-LABEL-WITH-DESC
-// RUN: DFSAN_OPTIONS=fast16labels=1:dump_labels_at_exit=/dev/stdout not %run \
-// RUN:   %t 2>&1 | FileCheck %s --check-prefix=DUMP-LABELS
 //
 // Tests DFSAN_OPTIONS=fast16labels=1
 //
@@ -33,7 +31,6 @@ int main(int argc, char *argv[]) {
   // HAS-LABEL-WITH-DESC: FATAL: DataFlowSanitizer: dfsan_has_label_with_desc is unsupported
   if (strcmp(command, "dfsan_has_label_with_desc") == 0)
     dfsan_has_label_with_desc(1, "");
-  // DUMP-LABELS: FATAL: DataFlowSanitizer: dfsan_dump_labels is unsupported
 
   // Supported usage.
   int a = 10;

@@ -362,7 +362,7 @@ dfsan_get_label_count(void) {
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE void
 dfsan_dump_labels(int fd) {
   if (flags().fast16labels)
-    ReportUnsupportedFast16("dfsan_dump_labels");
+    return;
 
   dfsan_label last_label =
       atomic_load(&__dfsan_last_label, memory_order_relaxed);

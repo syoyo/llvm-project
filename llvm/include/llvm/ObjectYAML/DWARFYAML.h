@@ -119,12 +119,10 @@ struct DWARFContext {
 };
 
 struct Unit {
-  dwarf::DwarfFormat Format;
-  yaml::Hex64 Length;
-  uint16_t Version;
+  dwarf::FormParams FormParams;
+  Optional<yaml::Hex64> Length;
   llvm::dwarf::UnitType Type; // Added in DWARF 5
   yaml::Hex64 AbbrOffset;
-  uint8_t AddrSize;
   std::vector<Entry> Entries;
 };
 
