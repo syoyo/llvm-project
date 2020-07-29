@@ -459,7 +459,7 @@ let Predicates = [PrefixInstrs] in {
   let Interpretation64Bit = 1, isCodeGenOnly = 1 in {
     defm PADDI8 :
       MLS_DForm_R_SI34_RTA5_p<14, (outs g8rc:$RT), (ins g8rc:$RA, s34imm:$SI),
-                              (ins immZero:$RA, s34imm:$SI),
+                              (ins immZero:$RA, s34imm_pcrel:$SI),
                               "paddi $RT, $RA, $SI", IIC_LdStLFD>;
     let isReMaterializable = 1, isAsCheapAsAMove = 1, isMoveImm = 1 in {
       def PLI8 : MLS_DForm_SI34_RT5<14, (outs g8rc:$RT),
@@ -469,7 +469,7 @@ let Predicates = [PrefixInstrs] in {
   }
   defm PADDI :
     MLS_DForm_R_SI34_RTA5_p<14, (outs gprc:$RT), (ins gprc:$RA, s34imm:$SI),
-                            (ins immZero:$RA, s34imm:$SI),
+                            (ins immZero:$RA, s34imm_pcrel:$SI),
                             "paddi $RT, $RA, $SI", IIC_LdStLFD>;
   let isReMaterializable = 1, isAsCheapAsAMove = 1, isMoveImm = 1 in {
     def PLI : MLS_DForm_SI34_RT5<14, (outs gprc:$RT),
@@ -905,6 +905,38 @@ let Predicates = [IsISA3_1] in {
               [(set v2i64:$vD,
                     (int_ppc_altivec_vinsdrx v2i64:$vDi, i64:$rA, i64:$rB))]>,
               RegConstraint<"$vDi = $vD">, NoEncode<"$vDi">;
+  def VEXTDUBVLX : VAForm_1a<24, (outs vrrc:$vD),
+                             (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                             "vextdubvlx $vD, $vA, $vB, $rC",
+                             IIC_VecGeneral, []>;
+  def VEXTDUBVRX : VAForm_1a<25, (outs vrrc:$vD),
+                             (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                             "vextdubvrx $vD, $vA, $vB, $rC",
+                             IIC_VecGeneral, []>;
+  def VEXTDUHVLX : VAForm_1a<26, (outs vrrc:$vD),
+                             (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                             "vextduhvlx $vD, $vA, $vB, $rC",
+                             IIC_VecGeneral, []>;
+  def VEXTDUHVRX : VAForm_1a<27, (outs vrrc:$vD),
+                             (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                             "vextduhvrx $vD, $vA, $vB, $rC",
+                             IIC_VecGeneral, []>;
+  def VEXTDUWVLX : VAForm_1a<28, (outs vrrc:$vD),
+                             (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                             "vextduwvlx $vD, $vA, $vB, $rC",
+                             IIC_VecGeneral, []>;
+  def VEXTDUWVRX : VAForm_1a<29, (outs vrrc:$vD),
+                             (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                             "vextduwvrx $vD, $vA, $vB, $rC",
+                             IIC_VecGeneral, []>;
+  def VEXTDDVLX : VAForm_1a<30, (outs vrrc:$vD),
+                            (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                            "vextddvlx $vD, $vA, $vB, $rC",
+                            IIC_VecGeneral, []>;
+  def VEXTDDVRX : VAForm_1a<31, (outs vrrc:$vD),
+                            (ins vrrc:$vA, vrrc:$vB, g8rc:$rC),
+                            "vextddvrx $vD, $vA, $vB, $rC",
+                            IIC_VecGeneral, []>;
    def VPDEPD : VXForm_1<1485, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                          "vpdepd $vD, $vA, $vB", IIC_VecGeneral,
                          [(set v2i64:$vD,
