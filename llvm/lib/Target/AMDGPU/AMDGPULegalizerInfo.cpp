@@ -711,7 +711,8 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
        .scalarize(0)
        .lower();
 
-  getActionDefinitionsBuilder(G_INTRINSIC_ROUND)
+  // Lower roundeven into G_FRINT
+  getActionDefinitionsBuilder({G_INTRINSIC_ROUND, G_INTRINSIC_ROUNDEVEN})
     .scalarize(0)
     .lower();
 
@@ -1286,7 +1287,11 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
         })
       .clampScalar(EltTypeIdx, S32, S64)
       .clampScalar(VecTypeIdx, S32, S64)
-      .clampScalar(IdxTypeIdx, S32, S32);
+      .clampScalar(IdxTypeIdx, S32, S32)
+      // TODO: Clamp the number of elements before resorting to stack lowering.
+      // It should only be necessary with variable indexes.
+      // As a last resort, lower to the stack
+      .lower();
   }
 
   getActionDefinitionsBuilder(G_EXTRACT_VECTOR_ELT)
@@ -1630,8 +1635,7 @@ Register AMDGPULegalizerInfo::getSegmentAperture(
   Register QueuePtr = MRI.createGenericVirtualRegister(
     LLT::pointer(AMDGPUAS::CONSTANT_ADDRESS, 64));
 
-  const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
-  if (!loadInputValue(QueuePtr, B, &MFI->getArgInfo().QueuePtr))
+  if (!loadInputValue(QueuePtr, B, AMDGPUFunctionArgInfo::QUEUE_PTR))
     return Register();
 
   // Offset into amd_queue_t for group_segment_aperture_base_hi /
@@ -1673,8 +1677,7 @@ bool AMDGPULegalizerInfo::legalizeAddrSpaceCast(
   const AMDGPUTargetMachine &TM
     = static_cast<const AMDGPUTargetMachine &>(MF.getTarget());
 
-  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
-  if (ST.getTargetLowering()->isNoopAddrSpaceCast(SrcAS, DestAS)) {
+  if (TM.isNoopAddrSpaceCast(SrcAS, DestAS)) {
     MI.setDesc(B.getTII().get(TargetOpcode::G_BITCAST));
     return true;
   }
@@ -2247,8 +2250,7 @@ bool AMDGPULegalizerInfo::legalizeAtomicCmpXChg(
   Register CmpVal = MI.getOperand(2).getReg();
   Register NewVal = MI.getOperand(3).getReg();
 
-  assert(SITargetLowering::isFlatGlobalAddrSpace(
-           MRI.getType(PtrReg).getAddressSpace()) &&
+  assert(AMDGPU::isFlatGlobalAddrSpace(MRI.getType(PtrReg).getAddressSpace()) &&
          "this should not have been custom lowered");
 
   LLT ValTy = MRI.getType(CmpVal);
@@ -2496,33 +2498,16 @@ Register AMDGPULegalizerInfo::getLiveInRegister(MachineIRBuilder &B,
   return insertLiveInCopy(B, MRI, LiveIn, PhyReg);
 }
 
-const ArgDescriptor *AMDGPULegalizerInfo::getArgDescriptor(
-    MachineIRBuilder &B, AMDGPUFunctionArgInfo::PreloadedValue ArgType) const {
-  const SIMachineFunctionInfo *MFI = B.getMF().getInfo<SIMachineFunctionInfo>();
-  const ArgDescriptor *Arg;
-  const TargetRegisterClass *RC;
-  LLT ArgTy;
-  std::tie(Arg, RC, ArgTy) = MFI->getPreloadedValue(ArgType);
-  if (!Arg) {
-    LLVM_DEBUG(dbgs() << "Required arg register missing\n");
-    return nullptr;
-  }
-  return Arg;
-}
-
 bool AMDGPULegalizerInfo::loadInputValue(Register DstReg, MachineIRBuilder &B,
-                                         const ArgDescriptor *Arg) const {
-  if (!Arg->isRegister() || !Arg->getRegister().isValid())
-    return false; // TODO: Handle these
-
-  Register SrcReg = Arg->getRegister();
+                                         const ArgDescriptor *Arg,
+                                         const TargetRegisterClass *ArgRC,
+                                         LLT ArgTy) const {
+  MCRegister SrcReg = Arg->getRegister();
   assert(SrcReg.isPhysical() && "Physical register expected");
   assert(DstReg.isVirtual() && "Virtual register expected");
 
   MachineRegisterInfo &MRI = *B.getMRI();
-
-  LLT Ty = MRI.getType(DstReg);
-  Register LiveIn = getLiveInRegister(B, MRI, SrcReg, Ty);
+  Register LiveIn = getLiveInRegister(B, MRI, SrcReg, ArgTy);
 
   if (Arg->isMasked()) {
     // TODO: Should we try to emit this once in the entry block?
@@ -2545,15 +2530,24 @@ bool AMDGPULegalizerInfo::loadInputValue(Register DstReg, MachineIRBuilder &B,
   return true;
 }
 
+bool AMDGPULegalizerInfo::loadInputValue(
+    Register DstReg, MachineIRBuilder &B,
+    AMDGPUFunctionArgInfo::PreloadedValue ArgType) const {
+  const SIMachineFunctionInfo *MFI = B.getMF().getInfo<SIMachineFunctionInfo>();
+  const ArgDescriptor *Arg;
+  const TargetRegisterClass *ArgRC;
+  LLT ArgTy;
+  std::tie(Arg, ArgRC, ArgTy) = MFI->getPreloadedValue(ArgType);
+
+  if (!Arg->isRegister() || !Arg->getRegister().isValid())
+    return false; // TODO: Handle these
+  return loadInputValue(DstReg, B, Arg, ArgRC, ArgTy);
+}
+
 bool AMDGPULegalizerInfo::legalizePreloadedArgIntrin(
     MachineInstr &MI, MachineRegisterInfo &MRI, MachineIRBuilder &B,
     AMDGPUFunctionArgInfo::PreloadedValue ArgType) const {
-
-  const ArgDescriptor *Arg = getArgDescriptor(B, ArgType);
-  if (!Arg)
-    return false;
-
-  if (!loadInputValue(MI.getOperand(0).getReg(), B, Arg))
+  if (!loadInputValue(MI.getOperand(0).getReg(), B, ArgType))
     return false;
 
   MI.eraseFromParent();
@@ -3165,23 +3159,15 @@ bool AMDGPULegalizerInfo::legalizeFDIVFastIntrin(MachineInstr &MI,
 bool AMDGPULegalizerInfo::getImplicitArgPtr(Register DstReg,
                                             MachineRegisterInfo &MRI,
                                             MachineIRBuilder &B) const {
-  const SIMachineFunctionInfo *MFI = B.getMF().getInfo<SIMachineFunctionInfo>();
   uint64_t Offset =
     ST.getTargetLowering()->getImplicitParameterOffset(
       B.getMF(), AMDGPUTargetLowering::FIRST_IMPLICIT);
   LLT DstTy = MRI.getType(DstReg);
   LLT IdxTy = LLT::scalar(DstTy.getSizeInBits());
 
-  const ArgDescriptor *Arg;
-  const TargetRegisterClass *RC;
-  LLT ArgTy;
-  std::tie(Arg, RC, ArgTy) =
-      MFI->getPreloadedValue(AMDGPUFunctionArgInfo::KERNARG_SEGMENT_PTR);
-  if (!Arg)
-    return false;
-
   Register KernargPtrReg = MRI.createGenericVirtualRegister(DstTy);
-  if (!loadInputValue(KernargPtrReg, B, Arg))
+  if (!loadInputValue(KernargPtrReg, B,
+                      AMDGPUFunctionArgInfo::KERNARG_SEGMENT_PTR))
     return false;
 
   // FIXME: This should be nuw
@@ -4169,16 +4155,12 @@ bool AMDGPULegalizerInfo::legalizeTrapIntrinsic(MachineInstr &MI,
   } else {
     // Pass queue pointer to trap handler as input, and insert trap instruction
     // Reference: https://llvm.org/docs/AMDGPUUsage.html#trap-handler-abi
-    const ArgDescriptor *Arg =
-        getArgDescriptor(B, AMDGPUFunctionArgInfo::QUEUE_PTR);
-    if (!Arg)
-      return false;
     MachineRegisterInfo &MRI = *B.getMRI();
     Register SGPR01(AMDGPU::SGPR0_SGPR1);
     Register LiveIn = getLiveInRegister(
         B, MRI, SGPR01, LLT::pointer(AMDGPUAS::CONSTANT_ADDRESS, 64),
         /*InsertLiveInCopy=*/false);
-    if (!loadInputValue(LiveIn, B, Arg))
+    if (!loadInputValue(LiveIn, B, AMDGPUFunctionArgInfo::QUEUE_PTR))
       return false;
     B.buildCopy(SGPR01, LiveIn);
     B.buildInstr(AMDGPU::S_TRAP)

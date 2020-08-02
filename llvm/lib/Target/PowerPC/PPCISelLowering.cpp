@@ -339,6 +339,9 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
     setOperationAction(ISD::FMA  , MVT::f32, Legal);
   }
 
+  if (Subtarget.hasSPE())
+    setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
+
   setOperationAction(ISD::FLT_ROUNDS_, MVT::i32, Custom);
 
   // If we're enabling GP optimizations, use hardware square root
@@ -936,6 +939,8 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
         setOperationAction(ISD::ADD, MVT::v2i64, Expand);
         setOperationAction(ISD::SUB, MVT::v2i64, Expand);
       }
+
+      setOperationAction(ISD::SETCC, MVT::v1i128, Expand);
 
       setOperationAction(ISD::LOAD, MVT::v2i64, Promote);
       AddPromotedToType (ISD::LOAD, MVT::v2i64, MVT::v2f64);
@@ -7792,9 +7797,9 @@ SDValue PPCTargetLowering::LowerTRUNCATEVector(SDValue Op,
 /// LowerSELECT_CC - Lower floating point select_cc's into fsel instruction when
 /// possible.
 SDValue PPCTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
-  // Not FP? Not a fsel.
+  // Not FP, or using SPE? Not a fsel.
   if (!Op.getOperand(0).getValueType().isFloatingPoint() ||
-      !Op.getOperand(2).getValueType().isFloatingPoint())
+      !Op.getOperand(2).getValueType().isFloatingPoint() || Subtarget.hasSPE())
     return Op;
 
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
@@ -11929,8 +11934,13 @@ PPCTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     BuildMI(*BB, MI, dl, TII->get(PPC::MFFS), MFFSReg);
 
     // Set rounding mode to round-to-zero.
-    BuildMI(*BB, MI, dl, TII->get(PPC::MTFSB1)).addImm(31);
-    BuildMI(*BB, MI, dl, TII->get(PPC::MTFSB0)).addImm(30);
+    BuildMI(*BB, MI, dl, TII->get(PPC::MTFSB1))
+        .addImm(31)
+        .addReg(PPC::RM, RegState::ImplicitDefine);
+
+    BuildMI(*BB, MI, dl, TII->get(PPC::MTFSB0))
+        .addImm(30)
+        .addReg(PPC::RM, RegState::ImplicitDefine);
 
     // Perform addition.
     BuildMI(*BB, MI, dl, TII->get(PPC::FADD), Dest).addReg(Src1).addReg(Src2);
@@ -11992,10 +12002,12 @@ PPCTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     // the immediate to set the bits 62:63 of FPSCR.
     unsigned Mode = MI.getOperand(1).getImm();
     BuildMI(*BB, MI, dl, TII->get((Mode & 1) ? PPC::MTFSB1 : PPC::MTFSB0))
-      .addImm(31);
+        .addImm(31)
+        .addReg(PPC::RM, RegState::ImplicitDefine);
 
     BuildMI(*BB, MI, dl, TII->get((Mode & 2) ? PPC::MTFSB1 : PPC::MTFSB0))
-      .addImm(30);
+        .addImm(30)
+        .addReg(PPC::RM, RegState::ImplicitDefine);
   } else if (MI.getOpcode() == PPC::SETRND) {
     DebugLoc dl = MI.getDebugLoc();
 
