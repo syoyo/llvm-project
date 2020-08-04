@@ -6686,7 +6686,7 @@ static bool getTargetShuffleMaskIndices(SDValue MaskNode,
     return false;
 
   // Insert the extracted elements into the mask.
-  for (APInt Elt : EltBits)
+  for (const APInt &Elt : EltBits)
     RawMask.push_back(Elt.getZExtValue());
 
   return true;
@@ -28119,8 +28119,8 @@ bool X86TargetLowering::lowerAtomicLoadAsLoadSDNode(const LoadInst &LI) const {
 /// a) very likely accessed only by a single thread to minimize cache traffic,
 /// and b) definitely dereferenceable.  Returns the new Chain result.
 static SDValue emitLockedStackOp(SelectionDAG &DAG,
-                                 const X86Subtarget &Subtarget,
-                                 SDValue Chain, SDLoc DL) {
+                                 const X86Subtarget &Subtarget, SDValue Chain,
+                                 const SDLoc &DL) {
   // Implementation notes:
   // 1) LOCK prefix creates a full read/write reordering barrier for memory
   // operations issued by the current processor.  As such, the location
@@ -34464,6 +34464,10 @@ static SDValue combineX86ShuffleChain(ArrayRef<SDValue> Inputs, SDValue Root,
   assert((Inputs.size() == 1 || Inputs.size() == 2) &&
          "Unexpected number of shuffle inputs!");
 
+  MVT RootVT = Root.getSimpleValueType();
+  unsigned RootSizeInBits = RootVT.getSizeInBits();
+  unsigned NumRootElts = RootVT.getVectorNumElements();
+
   // Find the inputs that enter the chain. Note that multiple uses are OK
   // here, we're not going to remove the operands we find.
   bool UnaryShuffle = (Inputs.size() == 1);
@@ -34473,10 +34477,8 @@ static SDValue combineX86ShuffleChain(ArrayRef<SDValue> Inputs, SDValue Root,
 
   MVT VT1 = V1.getSimpleValueType();
   MVT VT2 = V2.getSimpleValueType();
-  MVT RootVT = Root.getSimpleValueType();
-  assert(VT1.getSizeInBits() == RootVT.getSizeInBits() &&
-         VT2.getSizeInBits() == RootVT.getSizeInBits() &&
-         "Vector size mismatch");
+  assert(VT1.getSizeInBits() == RootSizeInBits &&
+         VT2.getSizeInBits() == RootSizeInBits && "Vector size mismatch");
 
   SDLoc DL(Root);
   SDValue Res;
@@ -34488,8 +34490,6 @@ static SDValue combineX86ShuffleChain(ArrayRef<SDValue> Inputs, SDValue Root,
   }
 
   bool OptForSize = DAG.shouldOptForSize();
-  unsigned RootSizeInBits = RootVT.getSizeInBits();
-  unsigned NumRootElts = RootVT.getVectorNumElements();
   unsigned BaseMaskEltSizeInBits = RootSizeInBits / NumBaseMaskElts;
   bool FloatDomain = VT1.isFloatingPoint() || VT2.isFloatingPoint() ||
                      (RootVT.isFloatingPoint() && Depth >= 1) ||
@@ -38298,7 +38298,7 @@ static SDValue createMMXBuildVector(BuildVectorSDNode *BV, SelectionDAG &DAG,
 // a vector/float/double that got truncated/extended/bitcast to/from a scalar
 // integer. If so, replace the scalar ops with bool vector equivalents back down
 // the chain.
-static SDValue combineBitcastToBoolVector(EVT VT, SDValue V, SDLoc DL,
+static SDValue combineBitcastToBoolVector(EVT VT, SDValue V, const SDLoc &DL,
                                           SelectionDAG &DAG,
                                           const X86Subtarget &Subtarget) {
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
@@ -38351,6 +38351,10 @@ static SDValue combineBitcastToBoolVector(EVT VT, SDValue V, SDLoc DL,
   case ISD::SHL: {
     // If we find a suitable source, a SHL becomes a KSHIFTL.
     SDValue Src0 = V.getOperand(0);
+    if ((VT == MVT::v8i1 && !Subtarget.hasDQI()) ||
+        ((VT == MVT::v32i1 || VT == MVT::v64i1) && !Subtarget.hasBWI()))
+      break;
+
     if (auto *Amt = dyn_cast<ConstantSDNode>(V.getOperand(1)))
       if (SDValue N0 = combineBitcastToBoolVector(VT, Src0, DL, DAG, Subtarget))
         return DAG.getNode(
@@ -42773,6 +42777,17 @@ static SDValue combineParity(SDNode *N, SelectionDAG &DAG,
   SDLoc DL(N);
   SDValue X = N0.getOperand(0);
 
+  // Special case. If the input fits in 8-bits we can use a single 8-bit TEST.
+  if (DAG.MaskedValueIsZero(X, APInt::getBitsSetFrom(VT.getSizeInBits(), 8))) {
+    X = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, X);
+    SDValue Flags = DAG.getNode(X86ISD::CMP, DL, MVT::i32, X,
+                                DAG.getConstant(0, DL, MVT::i8));
+    // Copy the inverse of the parity flag into a register with setcc.
+    SDValue Setnp = getSETCC(X86::COND_NP, Flags, DL, DAG);
+    // Extend or truncate to the original type.
+    return DAG.getZExtOrTrunc(Setnp, DL, N->getValueType(0));
+  }
+
   // If this is 64-bit, its always best to xor the two 32-bit pieces together
   // even if we have popcnt.
   if (VT == MVT::i64) {
@@ -42976,7 +42991,7 @@ static SDValue combineAnd(SDNode *N, SelectionDAG &DAG,
     if (VT == SrcVecVT.getScalarType() &&
         N->getOperand(0)->isOnlyUserOf(SrcVec.getNode()) &&
         getTargetConstantBitsFromNode(BitMask, 8, UndefElts, EltBits) &&
-        llvm::all_of(EltBits, [](APInt M) {
+        llvm::all_of(EltBits, [](const APInt &M) {
           return M.isNullValue() || M.isAllOnesValue();
         })) {
       unsigned NumElts = SrcVecVT.getVectorNumElements();
@@ -48660,6 +48675,7 @@ static SDValue combineExtInVec(SDNode *N, SelectionDAG &DAG,
                                const X86Subtarget &Subtarget) {
   EVT VT = N->getValueType(0);
   SDValue In = N->getOperand(0);
+  unsigned Opcode = N->getOpcode();
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
 
   // Try to merge vector loads and extend_inreg to an extload.
@@ -48668,7 +48684,7 @@ static SDValue combineExtInVec(SDNode *N, SelectionDAG &DAG,
     auto *Ld = cast<LoadSDNode>(In);
     if (Ld->isSimple()) {
       MVT SVT = In.getSimpleValueType().getVectorElementType();
-      ISD::LoadExtType Ext = N->getOpcode() == ISD::SIGN_EXTEND_VECTOR_INREG
+      ISD::LoadExtType Ext = Opcode == ISD::SIGN_EXTEND_VECTOR_INREG
                                  ? ISD::SEXTLOAD
                                  : ISD::ZEXTLOAD;
       EVT MemVT =
@@ -48676,8 +48692,7 @@ static SDValue combineExtInVec(SDNode *N, SelectionDAG &DAG,
       if (TLI.isLoadExtLegal(Ext, VT, MemVT)) {
         SDValue Load =
             DAG.getExtLoad(Ext, SDLoc(N), VT, Ld->getChain(), Ld->getBasePtr(),
-                           Ld->getPointerInfo(), MemVT,
-                           Ld->getOriginalAlign(),
+                           Ld->getPointerInfo(), MemVT, Ld->getOriginalAlign(),
                            Ld->getMemOperand()->getFlags());
         DAG.ReplaceAllUsesOfValueWith(SDValue(Ld, 1), Load.getValue(1));
         return Load;
@@ -48686,8 +48701,9 @@ static SDValue combineExtInVec(SDNode *N, SelectionDAG &DAG,
   }
 
   // Attempt to combine as a shuffle.
-  // TODO: SSE41 support
-  if (Subtarget.hasAVX() && N->getOpcode() != ISD::SIGN_EXTEND_VECTOR_INREG) {
+  // TODO: SSE ZERO_EXTEND_VECTOR_INREG support.
+  if (Opcode == ISD::ANY_EXTEND_VECTOR_INREG ||
+      (Opcode == ISD::ZERO_EXTEND_VECTOR_INREG && Subtarget.hasAVX())) {
     SDValue Op(N, 0);
     if (TLI.isTypeLegal(VT) && TLI.isTypeLegal(In.getValueType()))
       if (SDValue Res = combineX86ShufflesRecursively(Op, DAG, Subtarget))
@@ -49594,8 +49610,8 @@ LowerXConstraint(EVT ConstraintVT) const {
 
 // Lower @cc targets via setcc.
 SDValue X86TargetLowering::LowerAsmOutputForConstraint(
-    SDValue &Chain, SDValue &Flag, SDLoc DL, const AsmOperandInfo &OpInfo,
-    SelectionDAG &DAG) const {
+    SDValue &Chain, SDValue &Flag, const SDLoc &DL,
+    const AsmOperandInfo &OpInfo, SelectionDAG &DAG) const {
   X86::CondCode Cond = parseConstraintCode(OpInfo.ConstraintCode);
   if (Cond == X86::COND_INVALID)
     return SDValue();
