@@ -66,20 +66,15 @@ class GpuLaunchFuncToGpuRuntimeCallsPass
 private:
   LLVM::LLVMDialect *getLLVMDialect() { return llvmDialect; }
 
-  llvm::LLVMContext &getLLVMContext() {
-    return getLLVMDialect()->getLLVMContext();
-  }
-
   void initializeCachedTypes() {
-    const llvm::Module &module = llvmDialect->getLLVMModule();
-    llvmVoidType = LLVM::LLVMType::getVoidTy(llvmDialect);
-    llvmPointerType = LLVM::LLVMType::getInt8PtrTy(llvmDialect);
+    llvmVoidType = LLVM::LLVMType::getVoidTy(&getContext());
+    llvmPointerType = LLVM::LLVMType::getInt8PtrTy(&getContext());
     llvmPointerPointerType = llvmPointerType.getPointerTo();
-    llvmInt8Type = LLVM::LLVMType::getInt8Ty(llvmDialect);
-    llvmInt32Type = LLVM::LLVMType::getInt32Ty(llvmDialect);
-    llvmInt64Type = LLVM::LLVMType::getInt64Ty(llvmDialect);
+    llvmInt8Type = LLVM::LLVMType::getInt8Ty(&getContext());
+    llvmInt32Type = LLVM::LLVMType::getInt32Ty(&getContext());
+    llvmInt64Type = LLVM::LLVMType::getInt64Ty(&getContext());
     llvmIntPtrType = LLVM::LLVMType::getIntNTy(
-        llvmDialect, module.getDataLayout().getPointerSizeInBits());
+        &getContext(), llvmDialect->getDataLayout().getPointerSizeInBits());
   }
 
   LLVM::LLVMType getVoidType() { return llvmVoidType; }
@@ -95,9 +90,9 @@ private:
   LLVM::LLVMType getInt64Type() { return llvmInt64Type; }
 
   LLVM::LLVMType getIntPtrType() {
-    const llvm::Module &module = getLLVMDialect()->getLLVMModule();
     return LLVM::LLVMType::getIntNTy(
-        getLLVMDialect(), module.getDataLayout().getPointerSizeInBits());
+        &getContext(),
+        getLLVMDialect()->getDataLayout().getPointerSizeInBits());
   }
 
   // Allocate a void pointer on the stack.
@@ -345,7 +340,7 @@ Value GpuLaunchFuncToGpuRuntimeCallsPass::generateKernelNameConstant(
       std::string(llvm::formatv("{0}_{1}_kernel_name", moduleName, name));
   return LLVM::createGlobalString(
       loc, builder, globalName, StringRef(kernelName.data(), kernelName.size()),
-      LLVM::Linkage::Internal, llvmDialect);
+      LLVM::Linkage::Internal);
 }
 
 // Emits LLVM IR to launch a kernel function. Expects the module that contains
@@ -383,9 +378,9 @@ void GpuLaunchFuncToGpuRuntimeCallsPass::translateGpuLaunchCalls(
 
   SmallString<128> nameBuffer(kernelModule.getName());
   nameBuffer.append(kGpuBinaryStorageSuffix);
-  Value data = LLVM::createGlobalString(
-      loc, builder, nameBuffer.str(), binaryAttr.getValue(),
-      LLVM::Linkage::Internal, getLLVMDialect());
+  Value data =
+      LLVM::createGlobalString(loc, builder, nameBuffer.str(),
+                               binaryAttr.getValue(), LLVM::Linkage::Internal);
 
   // Emit the load module call to load the module data. Error checking is done
   // in the called helper function.
