@@ -2908,7 +2908,8 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
     return Legalized;
   }
   case G_EXTRACT_VECTOR_ELT:
-    return lowerExtractVectorElt(MI);
+  case G_INSERT_VECTOR_ELT:
+    return lowerExtractInsertVectorElt(MI);
   case G_SHUFFLE_VECTOR:
     return lowerShuffleVector(MI);
   case G_DYN_STACKALLOC:
@@ -3473,6 +3474,59 @@ LegalizerHelper::fewerElementsVectorBuildVector(MachineInstr &MI,
 }
 
 LegalizerHelper::LegalizeResult
+LegalizerHelper::fewerElementsVectorExtractVectorElt(MachineInstr &MI,
+                                                     unsigned TypeIdx,
+                                                     LLT NarrowVecTy) {
+  assert(TypeIdx == 1 && "not a vector type index");
+
+  // TODO: Handle total scalarization case.
+  if (!NarrowVecTy.isVector())
+    return UnableToLegalize;
+
+  Register DstReg = MI.getOperand(0).getReg();
+  Register SrcVec = MI.getOperand(1).getReg();
+  Register Idx = MI.getOperand(2).getReg();
+  LLT VecTy = MRI.getType(SrcVec);
+
+  // If the index is a constant, we can really break this down as you would
+  // expect, and index into the target size pieces.
+  int64_t IdxVal;
+  if (mi_match(Idx, MRI, m_ICst(IdxVal))) {
+    // Avoid out of bounds indexing the pieces.
+    if (IdxVal >= VecTy.getNumElements()) {
+      MIRBuilder.buildUndef(DstReg);
+      MI.eraseFromParent();
+      return Legalized;
+    }
+
+    SmallVector<Register, 8> VecParts;
+    LLT GCDTy = extractGCDType(VecParts, VecTy, NarrowVecTy, SrcVec);
+
+    // Build a sequence of NarrowTy pieces in VecParts for this operand.
+    buildLCMMergePieces(VecTy, NarrowVecTy, GCDTy, VecParts,
+                        TargetOpcode::G_ANYEXT);
+
+    unsigned NewNumElts = NarrowVecTy.getNumElements();
+
+    LLT IdxTy = MRI.getType(Idx);
+    int64_t PartIdx = IdxVal / NewNumElts;
+    auto NewIdx =
+        MIRBuilder.buildConstant(IdxTy, IdxVal - NewNumElts * PartIdx);
+
+    MIRBuilder.buildExtractVectorElement(DstReg, VecParts[PartIdx], NewIdx);
+    MI.eraseFromParent();
+    return Legalized;
+  }
+
+  // With a variable index, we can't perform the extract in a smaller type, so
+  // we're forced to expand this.
+  //
+  // TODO: We could emit a chain of compare/select to figure out which piece to
+  // index.
+  return lowerExtractInsertVectorElt(MI);
+}
+
+LegalizerHelper::LegalizeResult
 LegalizerHelper::reduceLoadStoreWidth(MachineInstr &MI, unsigned TypeIdx,
                                       LLT NarrowTy) {
   // FIXME: Don't know how to handle secondary types yet.
@@ -3801,6 +3855,8 @@ LegalizerHelper::fewerElementsVector(MachineInstr &MI, unsigned TypeIdx,
     return fewerElementsVectorUnmergeValues(MI, TypeIdx, NarrowTy);
   case G_BUILD_VECTOR:
     return fewerElementsVectorBuildVector(MI, TypeIdx, NarrowTy);
+  case G_EXTRACT_VECTOR_ELT:
+    return fewerElementsVectorExtractVectorElt(MI, TypeIdx, NarrowTy);
   case G_LOAD:
   case G_STORE:
     return reduceLoadStoreWidth(MI, TypeIdx, NarrowTy);
@@ -5368,8 +5424,8 @@ LegalizerHelper::lowerUnmergeValues(MachineInstr &MI) {
   return Legalized;
 }
 
-/// Lower a vector extract by writing the vector to a stack temporary and
-/// reloading the element.
+/// Lower a vector extract or insert by writing the vector to a stack temporary
+/// and reloading the element or vector.
 ///
 /// %dst = G_EXTRACT_VECTOR_ELT %vec, %idx
 ///  =>
@@ -5379,10 +5435,15 @@ LegalizerHelper::lowerUnmergeValues(MachineInstr &MI) {
 ///  %element_ptr = G_PTR_ADD %stack_temp, %idx
 ///  %dst = G_LOAD %element_ptr
 LegalizerHelper::LegalizeResult
-LegalizerHelper::lowerExtractVectorElt(MachineInstr &MI) {
+LegalizerHelper::lowerExtractInsertVectorElt(MachineInstr &MI) {
   Register DstReg = MI.getOperand(0).getReg();
   Register SrcVec = MI.getOperand(1).getReg();
-  Register Idx = MI.getOperand(2).getReg();
+  Register InsertVal;
+  if (MI.getOpcode() == TargetOpcode::G_INSERT_VECTOR_ELT)
+    InsertVal = MI.getOperand(2).getReg();
+
+  Register Idx = MI.getOperand(MI.getNumOperands() - 1).getReg();
+
   LLT VecTy = MRI.getType(SrcVec);
   LLT EltTy = VecTy.getElementType();
   if (!EltTy.isByteSized()) { // Not implemented.
@@ -5391,30 +5452,39 @@ LegalizerHelper::lowerExtractVectorElt(MachineInstr &MI) {
   }
 
   unsigned EltBytes = EltTy.getSizeInBytes();
-  Align StoreAlign = getStackTemporaryAlignment(VecTy);
-  Align LoadAlign;
+  Align VecAlign = getStackTemporaryAlignment(VecTy);
+  Align EltAlign;
 
   MachinePointerInfo PtrInfo;
   auto StackTemp = createStackTemporary(TypeSize::Fixed(VecTy.getSizeInBytes()),
-                                        StoreAlign, PtrInfo);
-  MIRBuilder.buildStore(SrcVec, StackTemp, PtrInfo, StoreAlign);
+                                        VecAlign, PtrInfo);
+  MIRBuilder.buildStore(SrcVec, StackTemp, PtrInfo, VecAlign);
 
   // Get the pointer to the element, and be sure not to hit undefined behavior
   // if the index is out of bounds.
-  Register LoadPtr = getVectorElementPointer(StackTemp.getReg(0), VecTy, Idx);
+  Register EltPtr = getVectorElementPointer(StackTemp.getReg(0), VecTy, Idx);
 
   int64_t IdxVal;
   if (mi_match(Idx, MRI, m_ICst(IdxVal))) {
     int64_t Offset = IdxVal * EltBytes;
     PtrInfo = PtrInfo.getWithOffset(Offset);
-    LoadAlign = commonAlignment(StoreAlign, Offset);
+    EltAlign = commonAlignment(VecAlign, Offset);
   } else {
     // We lose information with a variable offset.
-    LoadAlign = getStackTemporaryAlignment(EltTy);
-    PtrInfo = MachinePointerInfo(MRI.getType(LoadPtr).getAddressSpace());
+    EltAlign = getStackTemporaryAlignment(EltTy);
+    PtrInfo = MachinePointerInfo(MRI.getType(EltPtr).getAddressSpace());
   }
 
-  MIRBuilder.buildLoad(DstReg, LoadPtr, PtrInfo, LoadAlign);
+  if (InsertVal) {
+    // Write the inserted element
+    MIRBuilder.buildStore(InsertVal, EltPtr, PtrInfo, EltAlign);
+
+    // Reload the whole vector.
+    MIRBuilder.buildLoad(DstReg, StackTemp, PtrInfo, VecAlign);
+  } else {
+    MIRBuilder.buildLoad(DstReg, EltPtr, PtrInfo, EltAlign);
+  }
+
   MI.eraseFromParent();
   return Legalized;
 }

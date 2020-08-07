@@ -279,6 +279,9 @@ public:
   LegalizeResult fewerElementsVectorBuildVector(MachineInstr &MI,
                                                 unsigned TypeIdx,
                                                 LLT NarrowTy);
+  LegalizeResult fewerElementsVectorExtractVectorElt(MachineInstr &MI,
+                                                     unsigned TypeIdx,
+                                                     LLT NarrowTy);
 
   LegalizeResult
   reduceLoadStoreWidth(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
@@ -338,7 +341,7 @@ public:
   LegalizeResult lowerFFloor(MachineInstr &MI);
   LegalizeResult lowerMergeValues(MachineInstr &MI);
   LegalizeResult lowerUnmergeValues(MachineInstr &MI);
-  LegalizeResult lowerExtractVectorElt(MachineInstr &MI);
+  LegalizeResult lowerExtractInsertVectorElt(MachineInstr &MI);
   LegalizeResult lowerShuffleVector(MachineInstr &MI);
   LegalizeResult lowerDynStackAlloc(MachineInstr &MI);
   LegalizeResult lowerExtract(MachineInstr &MI);
