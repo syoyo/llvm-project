@@ -2005,6 +2005,8 @@ def err_init_conversion_failed : Error<
   "|: different return type%diff{ ($ vs $)|}5,6"
   "|: different qualifiers (%5 vs %6)"
   "|: different exception specifications}4">;
+def note_forward_class_conversion : Note<"%0 is not defined, but forward "
+  "declared here; conversion would be valid if it's derived from %1">;
 
 def err_lvalue_to_rvalue_ref : Error<"rvalue reference %diff{to type $ cannot "
   "bind to lvalue of type $|cannot bind to incompatible lvalue}0,1">;
@@ -5044,8 +5046,8 @@ def err_unexpanded_parameter_pack : Error<
   "size|static assertion|fixed underlying type|enumerator value|"
   "using declaration|friend declaration|qualifier|initializer|default argument|"
   "non-type template parameter type|exception type|partial specialization|"
-  "__if_exists name|__if_not_exists name|lambda|block|type constraint}0 "
-  "contains%plural{0: an|:}1 unexpanded parameter pack"
+  "__if_exists name|__if_not_exists name|lambda|block|type constraint|"
+  "requirement}0 contains%plural{0: an|:}1 unexpanded parameter pack"
   "%plural{0:|1: %2|2:s %2 and %3|:s %2, %3, ...}1">;
 
 def err_pack_expansion_without_parameter_packs : Error<
@@ -10353,6 +10355,10 @@ def err_omp_allocator_used_in_clauses : Error<
   "data-sharing or data-mapping attribute clauses">;
 def err_omp_allocator_not_in_uses_allocators : Error<
   "allocator must be specified in the 'uses_allocators' clause">;
+def note_omp_protected_structured_block
+    : Note<"jump bypasses OpenMP structured block">;
+def note_omp_exits_structured_block
+    : Note<"jump exits scope of OpenMP structured block">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {

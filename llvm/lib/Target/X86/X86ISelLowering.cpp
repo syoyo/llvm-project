@@ -39633,10 +39633,14 @@ combineVSelectWithAllOnesOrZeros(SDNode *N, SelectionDAG &DAG,
 
   // vselect Cond, 000..., X -> andn Cond, X
   if (TValIsAllZeros) {
-    MVT AndNVT = MVT::getVectorVT(MVT::i64, CondVT.getSizeInBits() / 64);
-    SDValue CastCond = DAG.getBitcast(AndNVT, Cond);
-    SDValue CastRHS = DAG.getBitcast(AndNVT, RHS);
-    SDValue AndN = DAG.getNode(X86ISD::ANDNP, DL, AndNVT, CastCond, CastRHS);
+    SDValue CastRHS = DAG.getBitcast(CondVT, RHS);
+    SDValue AndN;
+    // The canonical form differs for i1 vectors - x86andnp is not used
+    if (CondVT.getScalarType() == MVT::i1)
+      AndN = DAG.getNode(ISD::AND, DL, CondVT, DAG.getNOT(DL, Cond, CondVT),
+                         CastRHS);
+    else
+      AndN = DAG.getNode(X86ISD::ANDNP, DL, CondVT, Cond, CastRHS);
     return DAG.getBitcast(VT, AndN);
   }
 
@@ -40159,13 +40163,13 @@ static SDValue combineSelect(SDNode *N, SelectionDAG &DAG,
   if (SDValue V = combineSelectOfTwoConstants(N, DAG))
     return V;
 
-  // Canonicalize max and min:
-  // (x > y) ? x : y -> (x >= y) ? x : y
-  // (x < y) ? x : y -> (x <= y) ? x : y
+  // Canonicalize min/max:
+  // (x > 0) ? x : 0 -> (x >= 0) ? x : 0
+  // (x < -1) ? x : -1 -> (x <= -1) ? x : -1
   // This allows use of COND_S / COND_NS (see TranslateX86CC) which eliminates
   // the need for an extra compare
   // against zero. e.g.
-  // (x - y) > 0 : (x - y) ? 0 -> (x - y) >= 0 : (x - y) ? 0
+  // (a - b) > 0 : (a - b) ? 0 -> (a - b) >= 0 : (a - b) ? 0
   // subl   %esi, %edi
   // testl  %edi, %edi
   // movl   $0, %eax
@@ -40176,18 +40180,14 @@ static SDValue combineSelect(SDNode *N, SelectionDAG &DAG,
   // cmovsl %eax, %edi
   if (N->getOpcode() == ISD::SELECT && Cond.getOpcode() == ISD::SETCC &&
       Cond.hasOneUse() &&
-      DAG.isEqualTo(LHS, Cond.getOperand(0)) &&
-      DAG.isEqualTo(RHS, Cond.getOperand(1))) {
+      LHS == Cond.getOperand(0) && RHS == Cond.getOperand(1)) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Cond.getOperand(2))->get();
-    switch (CC) {
-    default: break;
-    case ISD::SETLT:
-    case ISD::SETGT: {
-      ISD::CondCode NewCC = (CC == ISD::SETLT) ? ISD::SETLE : ISD::SETGE;
+    if ((CC == ISD::SETGT && isNullConstant(RHS)) ||
+        (CC == ISD::SETLT && isAllOnesConstant(RHS))) {
+      ISD::CondCode NewCC = CC == ISD::SETGT ? ISD::SETGE : ISD::SETLE;
       Cond = DAG.getSetCC(SDLoc(Cond), Cond.getValueType(),
                           Cond.getOperand(0), Cond.getOperand(1), NewCC);
       return DAG.getSelect(DL, VT, Cond, LHS, RHS);
-    }
     }
   }
 
