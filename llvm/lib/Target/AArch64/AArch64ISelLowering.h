@@ -77,6 +77,8 @@ enum NodeType : unsigned {
   FADD_PRED,
   FDIV_PRED,
   FMA_PRED,
+  FMAXNM_PRED,
+  FMINNM_PRED,
   FMUL_PRED,
   FSUB_PRED,
   MUL_PRED,
@@ -86,9 +88,15 @@ enum NodeType : unsigned {
   SMIN_PRED,
   SRA_PRED,
   SRL_PRED,
+  SUB_PRED,
   UDIV_PRED,
   UMAX_PRED,
   UMIN_PRED,
+
+  // Predicated instructions with the result of inactive lanes provided by the
+  // last operand.
+  SIGN_EXTEND_INREG_MERGE_PASSTHRU,
+  ZERO_EXTEND_INREG_MERGE_PASSTHRU,
 
   SETCC_MERGE_ZERO,
 

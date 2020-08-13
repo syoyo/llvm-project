@@ -5519,38 +5519,69 @@ void DumpStyle<ELFT>::printDependentLibsHelper(
 template <class ELFT>
 void DumpStyle<ELFT>::printRelocationsHelper(const ELFFile<ELFT> *Obj,
                                              const Elf_Shdr &Sec) {
-  const Elf_Shdr *SymTab =
-      unwrapOrError(this->FileName, Obj->getSection(Sec.sh_link));
+  auto Warn = [&](Error &&E,
+                  const Twine &Prefix = "unable to read relocations from") {
+    this->reportUniqueWarning(createError(Prefix + " " + describe(Obj, Sec) +
+                                          ": " + toString(std::move(E))));
+  };
+
+  // SHT_RELR/SHT_ANDROID_RELR sections do not have an associated symbol table.
+  // For them we should not treat the value of the sh_link field as an index of
+  // a symbol table.
+  const Elf_Shdr *SymTab;
+  if (Sec.sh_type != ELF::SHT_RELR && Sec.sh_type != ELF::SHT_ANDROID_RELR) {
+    Expected<const Elf_Shdr *> SymTabOrErr = Obj->getSection(Sec.sh_link);
+    if (!SymTabOrErr) {
+      Warn(SymTabOrErr.takeError(), "unable to locate a symbol table for");
+      return;
+    }
+    SymTab = *SymTabOrErr;
+  }
+
   unsigned SecNdx = &Sec - &cantFail(Obj->sections()).front();
   unsigned RelNdx = 0;
-
   switch (Sec.sh_type) {
   case ELF::SHT_REL:
-    for (const Elf_Rel &R : unwrapOrError(this->FileName, Obj->rels(&Sec)))
-      printRelReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    if (Expected<Elf_Rel_Range> RangeOrErr = Obj->rels(&Sec)) {
+      for (const Elf_Rel &R : *RangeOrErr)
+        printRelReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    } else {
+      Warn(RangeOrErr.takeError());
+    }
     break;
   case ELF::SHT_RELA:
-    for (const Elf_Rela &R : unwrapOrError(this->FileName, Obj->relas(&Sec)))
-      printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    if (Expected<Elf_Rela_Range> RangeOrErr = Obj->relas(&Sec)) {
+      for (const Elf_Rela &R : *RangeOrErr)
+        printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    } else {
+      Warn(RangeOrErr.takeError());
+    }
     break;
   case ELF::SHT_RELR:
   case ELF::SHT_ANDROID_RELR: {
-    Elf_Relr_Range Relrs = unwrapOrError(this->FileName, Obj->relrs(&Sec));
+    Expected<Elf_Relr_Range> RangeOrErr = Obj->relrs(&Sec);
+    if (!RangeOrErr) {
+      Warn(RangeOrErr.takeError());
+      break;
+    }
     if (opts::RawRelr) {
-      for (const Elf_Relr &R : Relrs)
+      for (const Elf_Relr &R : *RangeOrErr)
         printRelrReloc(R);
       break;
     }
 
-    for (const Elf_Rel &R : Obj->decode_relrs(Relrs))
-      printRelReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    for (const Elf_Rel &R : Obj->decode_relrs(*RangeOrErr))
+      printRelReloc(Obj, SecNdx, /*SymTab=*/nullptr, R, ++RelNdx);
     break;
   }
   case ELF::SHT_ANDROID_REL:
   case ELF::SHT_ANDROID_RELA:
-    for (const Elf_Rela &R :
-         unwrapOrError(this->FileName, Obj->android_relas(&Sec)))
-      printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    if (Expected<std::vector<Elf_Rela>> RelasOrErr = Obj->android_relas(&Sec)) {
+      for (const Elf_Rela &R : *RelasOrErr)
+        printRelaReloc(Obj, SecNdx, SymTab, R, ++RelNdx);
+    } else {
+      Warn(RelasOrErr.takeError());
+    }
     break;
   }
 }

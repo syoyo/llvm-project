@@ -107,7 +107,7 @@ bool VectorCombine::vectorizeLoadInsert(Instruction &I) {
 
   unsigned VectorSize = TTI.getMinVectorRegisterBitWidth();
   uint64_t ScalarSize = ScalarTy->getPrimitiveSizeInBits();
-  if (!ScalarSize || VectorSize % ScalarSize != 0)
+  if (!ScalarSize || !VectorSize || VectorSize % ScalarSize != 0)
     return false;
 
   // Check safety of replacing the scalar load with a larger vector load.
@@ -668,6 +668,10 @@ bool VectorCombine::foldExtractedCmps(Instruction &I) {
 /// handled in the callers of this function.
 bool VectorCombine::run() {
   if (DisableVectorCombine)
+    return false;
+
+  // Don't attempt vectorization if the target does not support vectors.
+  if (!TTI.getNumberOfRegisters(TTI.getRegisterClassForType(/*Vector*/ true)))
     return false;
 
   bool MadeChange = false;

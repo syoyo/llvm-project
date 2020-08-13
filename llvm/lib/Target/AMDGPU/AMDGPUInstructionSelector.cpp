@@ -557,8 +557,6 @@ bool AMDGPUInstructionSelector::selectG_UNMERGE_VALUES(MachineInstr &MI) const {
   if (!SrcRC || !RBI.constrainGenericRegister(SrcReg, *SrcRC, *MRI))
     return false;
 
-  const unsigned SrcFlags = getUndefRegState(Src.isUndef());
-
   // Note we could have mixed SGPR and VGPR destination banks for an SGPR
   // source, and this relies on the fact that the same subregister indices are
   // used for both.
@@ -566,7 +564,7 @@ bool AMDGPUInstructionSelector::selectG_UNMERGE_VALUES(MachineInstr &MI) const {
   for (int I = 0, E = NumDst; I != E; ++I) {
     MachineOperand &Dst = MI.getOperand(I);
     BuildMI(*BB, &MI, DL, TII.get(TargetOpcode::COPY), Dst.getReg())
-      .addReg(SrcReg, SrcFlags, SubRegs[I]);
+      .addReg(SrcReg, 0, SubRegs[I]);
 
     // Make sure the subregister index is valid for the source register.
     SrcRC = TRI.getSubClassWithSubReg(SrcRC, SubRegs[I]);
@@ -799,6 +797,63 @@ bool AMDGPUInstructionSelector::selectInterpP1F16(MachineInstr &MI) const {
   return true;
 }
 
+// Writelane is special in that it can use SGPR and M0 (which would normally
+// count as using the constant bus twice - but in this case it is allowed since
+// the lane selector doesn't count as a use of the constant bus). However, it is
+// still required to abide by the 1 SGPR rule. Fix this up if we might have
+// multiple SGPRs.
+bool AMDGPUInstructionSelector::selectWritelane(MachineInstr &MI) const {
+  // With a constant bus limit of at least 2, there's no issue.
+  if (STI.getConstantBusLimit(AMDGPU::V_WRITELANE_B32) > 1)
+    return selectImpl(MI, *CoverageInfo);
+
+  MachineBasicBlock *MBB = MI.getParent();
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register VDst = MI.getOperand(0).getReg();
+  Register Val = MI.getOperand(2).getReg();
+  Register LaneSelect = MI.getOperand(3).getReg();
+  Register VDstIn = MI.getOperand(4).getReg();
+
+  auto MIB = BuildMI(*MBB, &MI, DL, TII.get(AMDGPU::V_WRITELANE_B32), VDst);
+
+  Optional<ValueAndVReg> ConstSelect =
+    getConstantVRegValWithLookThrough(LaneSelect, *MRI, true, true);
+  if (ConstSelect) {
+    // The selector has to be an inline immediate, so we can use whatever for
+    // the other operands.
+    MIB.addReg(Val);
+    MIB.addImm(ConstSelect->Value &
+               maskTrailingOnes<uint64_t>(STI.getWavefrontSizeLog2()));
+  } else {
+    Optional<ValueAndVReg> ConstVal =
+      getConstantVRegValWithLookThrough(Val, *MRI, true, true);
+
+    // If the value written is an inline immediate, we can get away without a
+    // copy to m0.
+    if (ConstVal && AMDGPU::isInlinableLiteral32(ConstVal->Value,
+                                                 STI.hasInv2PiInlineImm())) {
+      MIB.addImm(ConstVal->Value);
+      MIB.addReg(LaneSelect);
+    } else {
+      MIB.addReg(Val);
+
+      // If the lane selector was originally in a VGPR and copied with
+      // readfirstlane, there's a hazard to read the same SGPR from the
+      // VALU. Constrain to a different SGPR to help avoid needing a nop later.
+      RBI.constrainGenericRegister(LaneSelect, AMDGPU::SReg_32_XM0RegClass, *MRI);
+
+      BuildMI(*MBB, *MIB, DL, TII.get(AMDGPU::COPY), AMDGPU::M0)
+        .addReg(LaneSelect);
+      MIB.addReg(AMDGPU::M0);
+    }
+  }
+
+  MIB.addReg(VDstIn);
+
+  MI.eraseFromParent();
+  return constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+}
+
 // We need to handle this here because tablegen doesn't support matching
 // instructions with multiple outputs.
 bool AMDGPUInstructionSelector::selectDivScale(MachineInstr &MI) const {
@@ -865,6 +920,8 @@ bool AMDGPUInstructionSelector::selectG_INTRINSIC(MachineInstr &I) const {
     return constrainCopyLikeIntrin(I, AMDGPU::SOFT_WQM);
   case Intrinsic::amdgcn_wwm:
     return constrainCopyLikeIntrin(I, AMDGPU::WWM);
+  case Intrinsic::amdgcn_writelane:
+    return selectWritelane(I);
   case Intrinsic::amdgcn_div_scale:
     return selectDivScale(I);
   case Intrinsic::amdgcn_icmp:
@@ -1696,11 +1753,6 @@ bool AMDGPUInstructionSelector::selectG_SELECT(MachineInstr &I) const {
   return Ret;
 }
 
-bool AMDGPUInstructionSelector::selectG_STORE(MachineInstr &I) const {
-  initM0(I);
-  return selectImpl(I, *CoverageInfo);
-}
-
 static int sizeToSubRegIndex(unsigned Size) {
   switch (Size) {
   case 32:
@@ -2226,19 +2278,20 @@ bool AMDGPUInstructionSelector::hasVgprParts(ArrayRef<GEPInfo> AddrInfo) const {
 }
 
 void AMDGPUInstructionSelector::initM0(MachineInstr &I) const {
-  MachineBasicBlock *BB = I.getParent();
-
   const LLT PtrTy = MRI->getType(I.getOperand(1).getReg());
   unsigned AS = PtrTy.getAddressSpace();
   if ((AS == AMDGPUAS::LOCAL_ADDRESS || AS == AMDGPUAS::REGION_ADDRESS) &&
       STI.ldsRequiresM0Init()) {
+    MachineBasicBlock *BB = I.getParent();
+
     // If DS instructions require M0 initializtion, insert it before selecting.
     BuildMI(*BB, &I, I.getDebugLoc(), TII.get(AMDGPU::S_MOV_B32), AMDGPU::M0)
       .addImm(-1);
   }
 }
 
-bool AMDGPUInstructionSelector::selectG_LOAD_ATOMICRMW(MachineInstr &I) const {
+bool AMDGPUInstructionSelector::selectG_LOAD_STORE_ATOMICRMW(
+  MachineInstr &I) const {
   initM0(I);
   return selectImpl(I, *CoverageInfo);
 }
@@ -2866,6 +2919,7 @@ bool AMDGPUInstructionSelector::select(MachineInstr &I) {
       return true;
     return selectImpl(I, *CoverageInfo);
   case TargetOpcode::G_LOAD:
+  case TargetOpcode::G_STORE:
   case TargetOpcode::G_ATOMIC_CMPXCHG:
   case TargetOpcode::G_ATOMICRMW_XCHG:
   case TargetOpcode::G_ATOMICRMW_ADD:
@@ -2882,13 +2936,11 @@ bool AMDGPUInstructionSelector::select(MachineInstr &I) {
   case AMDGPU::G_AMDGPU_ATOMIC_DEC:
   case AMDGPU::G_AMDGPU_ATOMIC_FMIN:
   case AMDGPU::G_AMDGPU_ATOMIC_FMAX:
-    return selectG_LOAD_ATOMICRMW(I);
+    return selectG_LOAD_STORE_ATOMICRMW(I);
   case AMDGPU::G_AMDGPU_ATOMIC_CMPXCHG:
     return selectG_AMDGPU_ATOMIC_CMPXCHG(I);
   case TargetOpcode::G_SELECT:
     return selectG_SELECT(I);
-  case TargetOpcode::G_STORE:
-    return selectG_STORE(I);
   case TargetOpcode::G_TRUNC:
     return selectG_TRUNC(I);
   case TargetOpcode::G_SEXT:

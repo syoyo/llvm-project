@@ -17,7 +17,7 @@
 namespace llvm {
 
 bool DWARFYAML::Data::isEmpty() const {
-  return DebugStrings.empty() && AbbrevDecls.empty() && DebugAranges &&
+  return DebugStrings.empty() && AbbrevDecls.empty() && !DebugAranges &&
          DebugRanges.empty() && !PubNames && !PubTypes && !GNUPubNames &&
          !GNUPubTypes && CompileUnits.empty() && DebugLines.empty();
 }
@@ -150,7 +150,7 @@ void MappingTraits<DWARFYAML::Unit>::mapping(IO &IO, DWARFYAML::Unit &Unit) {
   if (Unit.Version >= 5)
     IO.mapRequired("UnitType", Unit.Type);
   IO.mapRequired("AbbrOffset", Unit.AbbrOffset);
-  IO.mapRequired("AddrSize", Unit.AddrSize);
+  IO.mapOptional("AddrSize", Unit.AddrSize);
   IO.mapOptional("Entries", Unit.Entries);
 }
 
