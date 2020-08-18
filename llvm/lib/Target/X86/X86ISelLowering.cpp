@@ -11329,8 +11329,7 @@ static SDValue lowerShuffleWithVPMOV(const SDLoc &DL, ArrayRef<int> Mask,
                                      MVT VT, SDValue V1, SDValue V2,
                                      SelectionDAG &DAG,
                                      const X86Subtarget &Subtarget) {
-  if (VT != MVT::v16i8 && VT != MVT::v8i16)
-    return SDValue();
+  assert((VT == MVT::v16i8 || VT == MVT::v8i16) && "Unexpected VTRUNC type");
 
   if (Mask.size() != VT.getVectorNumElements())
     return SDValue();
@@ -14732,6 +14731,11 @@ static SDValue lowerV8I16Shuffle(const SDLoc &DL, ArrayRef<int> Mask,
                                                    Zeroable, Subtarget, DAG))
     return ZExt;
 
+  // Try to use lower using a truncation.
+  if (SDValue V =
+          lowerShuffleWithVPMOV(DL, Mask, MVT::v8i16, V1, V2, DAG, Subtarget))
+    return V;
+
   int NumV2Inputs = count_if(Mask, [](int M) { return M >= 8; });
 
   if (NumV2Inputs == 0) {
@@ -14915,6 +14919,11 @@ static SDValue lowerV16I8Shuffle(const SDLoc &DL, ArrayRef<int> Mask,
   if (SDValue ZExt = lowerShuffleAsZeroOrAnyExtend(DL, MVT::v16i8, V1, V2, Mask,
                                                    Zeroable, Subtarget, DAG))
     return ZExt;
+
+  // Try to use lower using a truncation.
+  if (SDValue V =
+          lowerShuffleWithVPMOV(DL, Mask, MVT::v16i8, V1, V2, DAG, Subtarget))
+    return V;
 
   // See if we can use SSE4A Extraction / Insertion.
   if (Subtarget.hasSSE4A())
@@ -18002,9 +18011,6 @@ static SDValue lowerVECTOR_SHUFFLE(SDValue Op, const X86Subtarget &Subtarget,
     ShuffleVectorSDNode::commuteMask(Mask);
     std::swap(V1, V2);
   }
-
-  if (SDValue V = lowerShuffleWithVPMOV(DL, Mask, VT, V1, V2, DAG, Subtarget))
-    return V;
 
   // For each vector width, delegate to a specialized lowering routine.
   if (VT.is128BitVector())
@@ -24507,6 +24513,12 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
       SDValue Src2 = Op.getOperand(2);
       SDValue Src3 = Op.getOperand(3);
 
+      if (IntrData->Type == INTR_TYPE_3OP_IMM8 &&
+          Src3.getValueType() != MVT::i8) {
+        Src3 = DAG.getTargetConstant(
+            cast<ConstantSDNode>(Src3)->getZExtValue() & 0xff, dl, MVT::i8);
+      }
+
       // We specify 2 possible opcodes for intrinsics with rounding modes.
       // First, we check if the intrinsic may have non-default rounding mode,
       // (IntrData->Opc1 != 0), then we check the rounding mode operand.
@@ -24525,9 +24537,18 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
       return DAG.getNode(IntrData->Opc0, dl, Op.getValueType(),
                          {Src1, Src2, Src3});
     }
-    case INTR_TYPE_4OP:
-      return DAG.getNode(IntrData->Opc0, dl, Op.getValueType(), Op.getOperand(1),
-        Op.getOperand(2), Op.getOperand(3), Op.getOperand(4));
+    case INTR_TYPE_4OP_IMM8: {
+      assert(Op.getOperand(4)->getOpcode() == ISD::TargetConstant);
+      SDValue Src4 = Op.getOperand(4);
+      if (Src4.getValueType() != MVT::i8) {
+        Src4 = DAG.getTargetConstant(
+            cast<ConstantSDNode>(Src4)->getZExtValue() & 0xff, dl, MVT::i8);
+      }
+
+      return DAG.getNode(IntrData->Opc0, dl, Op.getValueType(),
+                         Op.getOperand(1), Op.getOperand(2), Op.getOperand(3),
+                         Src4);
+    }
     case INTR_TYPE_1OP_MASK: {
       SDValue Src = Op.getOperand(1);
       SDValue PassThru = Op.getOperand(2);
@@ -25325,9 +25346,9 @@ SDValue X86TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
     // MMX register.
     ShAmt = DAG.getNode(X86ISD::MMX_MOVW2D, DL, MVT::x86mmx, ShAmt);
     return DAG.getNode(ISD::INTRINSIC_WO_CHAIN, DL, Op.getValueType(),
-                       DAG.getConstant(NewIntrinsic, DL, MVT::i32),
+                       DAG.getTargetConstant(NewIntrinsic, DL,
+                                             getPointerTy(DAG.getDataLayout())),
                        Op.getOperand(1), ShAmt);
-
   }
   }
 }
@@ -38383,6 +38404,8 @@ static SDValue createMMXBuildVector(BuildVectorSDNode *BV, SelectionDAG &DAG,
   // Convert build vector ops to MMX data in the bottom elements.
   SmallVector<SDValue, 8> Ops;
 
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+
   // Broadcast - use (PUNPCKL+)PSHUFW to broadcast single element.
   if (Splat) {
     if (Splat.isUndef())
@@ -38395,14 +38418,16 @@ static SDValue createMMXBuildVector(BuildVectorSDNode *BV, SelectionDAG &DAG,
       if (NumElts == 8)
         Splat = DAG.getNode(
             ISD::INTRINSIC_WO_CHAIN, DL, MVT::x86mmx,
-            DAG.getConstant(Intrinsic::x86_mmx_punpcklbw, DL, MVT::i32), Splat,
-            Splat);
+            DAG.getTargetConstant(Intrinsic::x86_mmx_punpcklbw, DL,
+                                  TLI.getPointerTy(DAG.getDataLayout())),
+            Splat, Splat);
 
       // Use PSHUFW to repeat 16-bit elements.
       unsigned ShufMask = (NumElts > 2 ? 0 : 0x44);
       return DAG.getNode(
           ISD::INTRINSIC_WO_CHAIN, DL, MVT::x86mmx,
-          DAG.getTargetConstant(Intrinsic::x86_sse_pshuf_w, DL, MVT::i32),
+          DAG.getTargetConstant(Intrinsic::x86_sse_pshuf_w, DL,
+                                TLI.getPointerTy(DAG.getDataLayout())),
           Splat, DAG.getTargetConstant(ShufMask, DL, MVT::i8));
     }
     Ops.append(NumElts, Splat);
@@ -38418,7 +38443,8 @@ static SDValue createMMXBuildVector(BuildVectorSDNode *BV, SelectionDAG &DAG,
         (NumOps == 2 ? Intrinsic::x86_mmx_punpckldq
                      : (NumOps == 4 ? Intrinsic::x86_mmx_punpcklwd
                                     : Intrinsic::x86_mmx_punpcklbw));
-    SDValue Intrin = DAG.getConstant(IntrinOp, DL, MVT::i32);
+    SDValue Intrin = DAG.getTargetConstant(
+        IntrinOp, DL, TLI.getPointerTy(DAG.getDataLayout()));
     for (unsigned i = 0; i != NumOps; i += 2)
       Ops[i / 2] = DAG.getNode(ISD::INTRINSIC_WO_CHAIN, DL, MVT::x86mmx, Intrin,
                                Ops[i], Ops[i + 1]);
@@ -50285,7 +50311,8 @@ X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
       return std::make_pair(X86::EFLAGS, &X86::CCRRegClass);
 
     // dirflag -> DF
-    if (StringRef("{dirflag}").equals_lower(Constraint))
+    // Only allow for clobber.
+    if (StringRef("{dirflag}").equals_lower(Constraint) && VT == MVT::Other)
       return std::make_pair(X86::DF, &X86::DFCCRRegClass);
 
     // fpsr -> FPSW
