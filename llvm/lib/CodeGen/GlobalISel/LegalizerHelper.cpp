@@ -90,14 +90,16 @@ LegalizerHelper::LegalizerHelper(MachineFunction &MF,
                                  GISelChangeObserver &Observer,
                                  MachineIRBuilder &Builder)
     : MIRBuilder(Builder), Observer(Observer), MRI(MF.getRegInfo()),
-      LI(*MF.getSubtarget().getLegalizerInfo()) {
+      LI(*MF.getSubtarget().getLegalizerInfo()),
+      TLI(*MF.getSubtarget().getTargetLowering()) {
   MIRBuilder.setChangeObserver(Observer);
 }
 
 LegalizerHelper::LegalizerHelper(MachineFunction &MF, const LegalizerInfo &LI,
                                  GISelChangeObserver &Observer,
                                  MachineIRBuilder &B)
-    : MIRBuilder(B), Observer(Observer), MRI(MF.getRegInfo()), LI(LI) {
+  : MIRBuilder(B), Observer(Observer), MRI(MF.getRegInfo()), LI(LI),
+    TLI(*MF.getSubtarget().getTargetLowering()) {
   MIRBuilder.setChangeObserver(Observer);
 }
 LegalizerHelper::LegalizeResult
@@ -241,22 +243,21 @@ void LegalizerHelper::insertParts(Register DstReg,
   }
 }
 
-/// Return the result registers of G_UNMERGE_VALUES \p MI in \p Regs
+/// Append the result registers of G_UNMERGE_VALUES \p MI to \p Regs.
 static void getUnmergeResults(SmallVectorImpl<Register> &Regs,
                               const MachineInstr &MI) {
   assert(MI.getOpcode() == TargetOpcode::G_UNMERGE_VALUES);
 
+  const int StartIdx = Regs.size();
   const int NumResults = MI.getNumOperands() - 1;
-  Regs.resize(NumResults);
+  Regs.resize(Regs.size() + NumResults);
   for (int I = 0; I != NumResults; ++I)
-    Regs[I] = MI.getOperand(I).getReg();
+    Regs[StartIdx + I] = MI.getOperand(I).getReg();
 }
 
-LLT LegalizerHelper::extractGCDType(SmallVectorImpl<Register> &Parts, LLT DstTy,
-                                    LLT NarrowTy, Register SrcReg) {
+void LegalizerHelper::extractGCDType(SmallVectorImpl<Register> &Parts,
+                                     LLT GCDTy, Register SrcReg) {
   LLT SrcTy = MRI.getType(SrcReg);
-
-  LLT GCDTy = getGCDType(getGCDType(SrcTy, NarrowTy), DstTy);
   if (SrcTy == GCDTy) {
     // If the source already evenly divides the result type, we don't need to do
     // anything.
@@ -266,7 +267,13 @@ LLT LegalizerHelper::extractGCDType(SmallVectorImpl<Register> &Parts, LLT DstTy,
     auto Unmerge = MIRBuilder.buildUnmerge(GCDTy, SrcReg);
     getUnmergeResults(Parts, *Unmerge);
   }
+}
 
+LLT LegalizerHelper::extractGCDType(SmallVectorImpl<Register> &Parts, LLT DstTy,
+                                    LLT NarrowTy, Register SrcReg) {
+  LLT SrcTy = MRI.getType(SrcReg);
+  LLT GCDTy = getGCDType(getGCDType(SrcTy, NarrowTy), DstTy);
+  extractGCDType(Parts, GCDTy, SrcReg);
   return GCDTy;
 }
 
@@ -3608,18 +3615,52 @@ LegalizerHelper::fewerElementsVectorBuildVector(MachineInstr &MI,
 }
 
 LegalizerHelper::LegalizeResult
-LegalizerHelper::fewerElementsVectorExtractVectorElt(MachineInstr &MI,
-                                                     unsigned TypeIdx,
-                                                     LLT NarrowVecTy) {
-  assert(TypeIdx == 1 && "not a vector type index");
+LegalizerHelper::fewerElementsVectorConcatVectors(MachineInstr &MI,
+                                                  unsigned TypeIdx,
+                                                  LLT NarrowTy) {
+  if (TypeIdx != 1)
+    return UnableToLegalize;
+
+  Register DstReg = MI.getOperand(0).getReg();
+  LLT DstTy = MRI.getType(DstReg);
+  LLT SrcTy = MRI.getType(MI.getOperand(1).getReg());
+  LLT GCDTy = getGCDType(getGCDType(SrcTy, NarrowTy), DstTy);
+
+  // Break into a common type
+  SmallVector<Register, 16> Parts;
+  for (unsigned I = 1, E = MI.getNumOperands(); I != E; ++I)
+    extractGCDType(Parts, GCDTy, MI.getOperand(I).getReg());
+
+  // Build the requested new merge, padding with undef.
+  LLT LCMTy = buildLCMMergePieces(DstTy, NarrowTy, GCDTy, Parts,
+                                  TargetOpcode::G_ANYEXT);
+
+  // Pack into the original result register.
+  buildWidenedRemergeToDst(DstReg, LCMTy, Parts);
+
+  MI.eraseFromParent();
+  return Legalized;
+}
+
+LegalizerHelper::LegalizeResult
+LegalizerHelper::fewerElementsVectorExtractInsertVectorElt(MachineInstr &MI,
+                                                           unsigned TypeIdx,
+                                                           LLT NarrowVecTy) {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register SrcVec = MI.getOperand(1).getReg();
+  Register InsertVal;
+  bool IsInsert = MI.getOpcode() == TargetOpcode::G_INSERT_VECTOR_ELT;
+
+  assert((IsInsert ? TypeIdx == 0 : TypeIdx == 1) && "not a vector type index");
+  if (IsInsert)
+    InsertVal = MI.getOperand(2).getReg();
+
+  Register Idx = MI.getOperand(MI.getNumOperands() - 1).getReg();
 
   // TODO: Handle total scalarization case.
   if (!NarrowVecTy.isVector())
     return UnableToLegalize;
 
-  Register DstReg = MI.getOperand(0).getReg();
-  Register SrcVec = MI.getOperand(1).getReg();
-  Register Idx = MI.getOperand(2).getReg();
   LLT VecTy = MRI.getType(SrcVec);
 
   // If the index is a constant, we can really break this down as you would
@@ -3637,8 +3678,8 @@ LegalizerHelper::fewerElementsVectorExtractVectorElt(MachineInstr &MI,
     LLT GCDTy = extractGCDType(VecParts, VecTy, NarrowVecTy, SrcVec);
 
     // Build a sequence of NarrowTy pieces in VecParts for this operand.
-    buildLCMMergePieces(VecTy, NarrowVecTy, GCDTy, VecParts,
-                        TargetOpcode::G_ANYEXT);
+    LLT LCMTy = buildLCMMergePieces(VecTy, NarrowVecTy, GCDTy, VecParts,
+                                    TargetOpcode::G_ANYEXT);
 
     unsigned NewNumElts = NarrowVecTy.getNumElements();
 
@@ -3647,12 +3688,26 @@ LegalizerHelper::fewerElementsVectorExtractVectorElt(MachineInstr &MI,
     auto NewIdx =
         MIRBuilder.buildConstant(IdxTy, IdxVal - NewNumElts * PartIdx);
 
-    MIRBuilder.buildExtractVectorElement(DstReg, VecParts[PartIdx], NewIdx);
+    if (IsInsert) {
+      LLT PartTy = MRI.getType(VecParts[PartIdx]);
+
+      // Use the adjusted index to insert into one of the subvectors.
+      auto InsertPart = MIRBuilder.buildInsertVectorElement(
+          PartTy, VecParts[PartIdx], InsertVal, NewIdx);
+      VecParts[PartIdx] = InsertPart.getReg(0);
+
+      // Recombine the inserted subvector with the others to reform the result
+      // vector.
+      buildWidenedRemergeToDst(DstReg, LCMTy, VecParts);
+    } else {
+      MIRBuilder.buildExtractVectorElement(DstReg, VecParts[PartIdx], NewIdx);
+    }
+
     MI.eraseFromParent();
     return Legalized;
   }
 
-  // With a variable index, we can't perform the extract in a smaller type, so
+  // With a variable index, we can't perform the operation in a smaller type, so
   // we're forced to expand this.
   //
   // TODO: We could emit a chain of compare/select to figure out which piece to
@@ -3991,8 +4046,11 @@ LegalizerHelper::fewerElementsVector(MachineInstr &MI, unsigned TypeIdx,
     return fewerElementsVectorUnmergeValues(MI, TypeIdx, NarrowTy);
   case G_BUILD_VECTOR:
     return fewerElementsVectorBuildVector(MI, TypeIdx, NarrowTy);
+  case G_CONCAT_VECTORS:
+    return fewerElementsVectorConcatVectors(MI, TypeIdx, NarrowTy);
   case G_EXTRACT_VECTOR_ELT:
-    return fewerElementsVectorExtractVectorElt(MI, TypeIdx, NarrowTy);
+  case G_INSERT_VECTOR_ELT:
+    return fewerElementsVectorExtractInsertVectorElt(MI, TypeIdx, NarrowTy);
   case G_LOAD:
   case G_STORE:
     return reduceLoadStoreWidth(MI, TypeIdx, NarrowTy);
@@ -5693,7 +5751,6 @@ LegalizerHelper::lowerDynStackAlloc(MachineInstr &MI) {
   LLT PtrTy = MRI.getType(Dst);
   LLT IntPtrTy = LLT::scalar(PtrTy.getSizeInBits());
 
-  const auto &TLI = *MF.getSubtarget().getTargetLowering();
   Register SPReg = TLI.getStackPointerRegisterToSaveRestore();
   auto SPTmp = MIRBuilder.buildCopy(PtrTy, SPReg);
   SPTmp = MIRBuilder.buildCast(IntPtrTy, SPTmp);
@@ -6097,8 +6154,6 @@ LegalizerHelper::lowerBitreverse(MachineInstr &MI) {
 LegalizerHelper::LegalizeResult
 LegalizerHelper::lowerReadWriteRegister(MachineInstr &MI) {
   MachineFunction &MF = MIRBuilder.getMF();
-  const TargetSubtargetInfo &STI = MF.getSubtarget();
-  const TargetLowering *TLI = STI.getTargetLowering();
 
   bool IsRead = MI.getOpcode() == TargetOpcode::G_READ_REGISTER;
   int NameOpIdx = IsRead ? 1 : 0;
@@ -6109,7 +6164,7 @@ LegalizerHelper::lowerReadWriteRegister(MachineInstr &MI) {
   const MDString *RegStr = cast<MDString>(
     cast<MDNode>(MI.getOperand(NameOpIdx).getMetadata())->getOperand(0));
 
-  Register PhysReg = TLI->getRegisterByName(RegStr->getString().data(), Ty, MF);
+  Register PhysReg = TLI.getRegisterByName(RegStr->getString().data(), Ty, MF);
   if (!PhysReg.isValid())
     return UnableToLegalize;
 

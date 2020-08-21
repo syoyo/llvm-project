@@ -84,7 +84,6 @@ STATISTIC(NumFastStores, "Number of stores deleted");
 STATISTIC(NumFastOther, "Number of other instrs removed");
 STATISTIC(NumCompletePartials, "Number of stores dead by later partials");
 STATISTIC(NumModifiedStores, "Number of stores modified");
-STATISTIC(NumNoopStores, "Number of noop stores deleted");
 STATISTIC(NumCFGChecks, "Number of stores modified");
 STATISTIC(NumCFGTries, "Number of stores modified");
 STATISTIC(NumCFGSuccess, "Number of stores modified");
@@ -1075,8 +1074,7 @@ static bool tryToShortenBegin(Instruction *EarlierWrite,
   return false;
 }
 
-static bool removePartiallyOverlappedStores(AliasAnalysis *AA,
-                                            const DataLayout &DL,
+static bool removePartiallyOverlappedStores(const DataLayout &DL,
                                             InstOverlapIntervalsTy &IOL) {
   bool Changed = false;
   for (auto OI : IOL) {
@@ -1389,7 +1387,7 @@ static bool eliminateDeadStores(BasicBlock &BB, AliasAnalysis *AA,
   }
 
   if (EnablePartialOverwriteTracking)
-    MadeChange |= removePartiallyOverlappedStores(AA, DL, IOL);
+    MadeChange |= removePartiallyOverlappedStores(DL, IOL);
 
   // If this block ends in a return, unwind, or unreachable, all allocas are
   // dead at its end, which means stores to them are also dead.
@@ -2158,7 +2156,7 @@ bool eliminateDeadStoresMemorySSA(Function &F, AliasAnalysis &AA,
     if (isRemovable(SI) && State.storeIsNoop(KillingDef, SILoc, SILocUnd)) {
       LLVM_DEBUG(dbgs() << "DSE: Remove No-Op Store:\n  DEAD: " << *SI << '\n');
       State.deleteDeadInstruction(SI);
-      NumNoopStores++;
+      NumRedundantStores++;
       MadeChange = true;
       continue;
     }
@@ -2311,7 +2309,7 @@ bool eliminateDeadStoresMemorySSA(Function &F, AliasAnalysis &AA,
 
   if (EnablePartialOverwriteTracking)
     for (auto &KV : State.IOLs)
-      MadeChange |= removePartiallyOverlappedStores(&AA, DL, KV.second);
+      MadeChange |= removePartiallyOverlappedStores(DL, KV.second);
 
   MadeChange |= State.eliminateDeadWritesAtEndOfFunction();
   return MadeChange;

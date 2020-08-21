@@ -1,4 +1,4 @@
-; RUN: llc -filetype=obj -O0 -generate-type-units -split-dwarf-file=x.dwo < %s \
+; RUN: llc -filetype=obj -O0 -generate-type-units -mtriple=x86_64-unknown-linux-gnu -split-dwarf-file=x.dwo < %s \
 ; RUN:     | llvm-dwarfdump -debug-info -debug-types - \
 ; RUN:     | FileCheck --implicit-check-not=Unit --implicit-check-not=contents --implicit-check-not=declaration %s
 

@@ -1948,6 +1948,9 @@ void Attributor::identifyDefaultAbstractAttributes(Function &F) {
       // Every function with pointer return type might be marked
       // dereferenceable.
       getOrCreateAAFor<AADereferenceable>(RetPos);
+
+      // Every function with pointer return type might be marked noundef.
+      getOrCreateAAFor<AANoUndef>(RetPos);
     }
   }
 
@@ -1985,6 +1988,9 @@ void Attributor::identifyDefaultAbstractAttributes(Function &F) {
 
       // Every argument with pointer type might be privatizable (or promotable)
       getOrCreateAAFor<AAPrivatizablePtr>(ArgPos);
+
+      // Every argument with pointer type might be marked noundef.
+      getOrCreateAAFor<AANoUndef>(ArgPos);
     }
   }
 
@@ -2051,6 +2057,9 @@ void Attributor::identifyDefaultAbstractAttributes(Function &F) {
 
       // Call site argument attribute "nofree".
       getOrCreateAAFor<AANoFree>(CBArgPos);
+
+      // Call site argument attribute "noundef".
+      getOrCreateAAFor<AANoUndef>(CBArgPos);
     }
     return true;
   };
@@ -2214,7 +2223,7 @@ static bool runAttributorOnFunctions(InformationCache &InfoCache,
         Functions.insert(NewF);
 
         // Update call graph
-        CGUpdater.registerOutlinedFunction(*NewF);
+        CGUpdater.replaceFunctionWith(*F, *NewF);
         for (const Use &U : NewF->uses())
           if (CallBase *CB = dyn_cast<CallBase>(U.getUser())) {
             auto *CallerF = CB->getCaller();

@@ -1061,6 +1061,9 @@ public:
     return Triple;
   }
 
+  /// Returns the target ID if supported.
+  virtual llvm::Optional<std::string> getTargetID() const { return llvm::None; }
+
   const llvm::DataLayout &getDataLayout() const {
     assert(DataLayout && "Uninitialized DataLayout!");
     return *DataLayout;
@@ -1143,6 +1146,11 @@ public:
   /// brief Determine whether this TargetInfo supports the given CPU name.
   virtual bool isValidCPUName(StringRef Name) const {
     return true;
+  }
+
+  /// brief Determine whether this TargetInfo supports tune in target attribute.
+  virtual bool supportsTargetAttributeTune() const {
+    return false;
   }
 
   /// Use the specified ABI.
