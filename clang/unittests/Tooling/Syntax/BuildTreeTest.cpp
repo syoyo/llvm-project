@@ -102,282 +102,196 @@ void foo(int a, int b) {}
 }
 
 TEST_P(SyntaxTreeTest, If) {
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
-int main() {
-  if (1) {}
-  if (1) {} else if (0) {}
+void test() {
+  [[if (1) {}]]
+  [[if (1) {} else if (0) {}]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-int
-  |-SimpleDeclarator
-  | |-main
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
+      {R"txt(
+IfStatement
+|-if
+|-(
+|-IntegerLiteralExpression
+| `-1
+|-)
+`-CompoundStatement
+  |-{
+  `-}
+  )txt",
+       R"txt(
+IfStatement
+|-if
+|-(
+|-IntegerLiteralExpression
+| `-1
+|-)
+|-CompoundStatement
+| |-{
+| `-}
+|-else
+`-IfStatement
+  |-if
+  |-(
+  |-IntegerLiteralExpression
+  | `-0
+  |-)
   `-CompoundStatement
     |-{
-    |-IfStatement
-    | |-if
-    | |-(
-    | |-IntegerLiteralExpression
-    | | `-1
-    | |-)
-    | `-CompoundStatement
-    |   |-{
-    |   `-}
-    |-IfStatement
-    | |-if
-    | |-(
-    | |-IntegerLiteralExpression
-    | | `-1
-    | |-)
-    | |-CompoundStatement
-    | | |-{
-    | | `-}
-    | |-else
-    | `-IfStatement
-    |   |-if
-    |   |-(
-    |   |-IntegerLiteralExpression
-    |   | `-0
-    |   |-)
-    |   `-CompoundStatement
-    |     |-{
-    |     `-}
     `-}
-)txt"));
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, For) {
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
 void test() {
-  for (;;)  {}
+  [[for (;;)  {}]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-void
-  |-SimpleDeclarator
-  | |-test
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
-  `-CompoundStatement
-    |-{
-    |-ForStatement
-    | |-for
-    | |-(
-    | |-;
-    | |-;
-    | |-)
-    | `-CompoundStatement
-    |   |-{
-    |   `-}
-    `-}
-)txt"));
+      {R"txt(
+ForStatement
+|-for
+|-(
+|-;
+|-;
+|-)
+`-CompoundStatement
+  |-{
+  `-}
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, RangeBasedFor) {
   if (!GetParam().isCXX11OrLater()) {
     return;
   }
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
 void test() {
   int a[3];
-  for (int x : a)
-    ;
+  [[for (int x : a)
+    ;]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-void
-  |-SimpleDeclarator
-  | |-test
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
-  `-CompoundStatement
-    |-{
-    |-DeclarationStatement
-    | |-SimpleDeclaration
-    | | |-int
-    | | `-SimpleDeclarator
-    | |   |-a
-    | |   `-ArraySubscript
-    | |     |-[
-    | |     |-IntegerLiteralExpression
-    | |     | `-3
-    | |     `-]
-    | `-;
-    |-RangeBasedForStatement
-    | |-for
-    | |-(
-    | |-SimpleDeclaration
-    | | |-int
-    | | |-SimpleDeclarator
-    | | | `-x
-    | | `-:
-    | |-IdExpression
-    | | `-UnqualifiedId
-    | |   `-a
-    | |-)
-    | `-EmptyStatement
-    |   `-;
-    `-}
-)txt"));
+      {R"txt(
+RangeBasedForStatement
+|-for
+|-(
+|-SimpleDeclaration
+| |-int
+| |-SimpleDeclarator
+| | `-x
+| `-:
+|-IdExpression
+| `-UnqualifiedId
+|   `-a
+|-)
+`-EmptyStatement
+  `-;
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, DeclarationStatement) {
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
 void test() {
-  int a = 10;
+  [[int a = 10;]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-void
-  |-SimpleDeclarator
-  | |-test
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
-  `-CompoundStatement
-    |-{
-    |-DeclarationStatement
-    | |-SimpleDeclaration
-    | | |-int
-    | | `-SimpleDeclarator
-    | |   |-a
-    | |   |-=
-    | |   `-IntegerLiteralExpression
-    | |     `-10
-    | `-;
-    `-}
-)txt"));
+      {R"txt(
+DeclarationStatement
+|-SimpleDeclaration
+| |-int
+| `-SimpleDeclarator
+|   |-a
+|   |-=
+|   `-IntegerLiteralExpression
+|     `-10
+`-;
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, Switch) {
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
 void test() {
-  switch (1) {
+  [[switch (1) {
     case 0:
     default:;
-  }
+  }]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-void
-  |-SimpleDeclarator
-  | |-test
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
-  `-CompoundStatement
-    |-{
-    |-SwitchStatement
-    | |-switch
-    | |-(
-    | |-IntegerLiteralExpression
-    | | `-1
-    | |-)
-    | `-CompoundStatement
-    |   |-{
-    |   |-CaseStatement
-    |   | |-case
-    |   | |-IntegerLiteralExpression
-    |   | | `-0
-    |   | |-:
-    |   | `-DefaultStatement
-    |   |   |-default
-    |   |   |-:
-    |   |   `-EmptyStatement
-    |   |     `-;
-    |   `-}
-    `-}
-)txt"));
+      {R"txt(
+SwitchStatement
+|-switch
+|-(
+|-IntegerLiteralExpression
+| `-1
+|-)
+`-CompoundStatement
+  |-{
+  |-CaseStatement
+  | |-case
+  | |-IntegerLiteralExpression
+  | | `-0
+  | |-:
+  | `-DefaultStatement
+  |   |-default
+  |   |-:
+  |   `-EmptyStatement
+  |     `-;
+  `-}
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, While) {
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
 void test() {
-  while (1) { continue; break; }
+  [[while (1) { continue; break; }]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-void
-  |-SimpleDeclarator
-  | |-test
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
-  `-CompoundStatement
-    |-{
-    |-WhileStatement
-    | |-while
-    | |-(
-    | |-IntegerLiteralExpression
-    | | `-1
-    | |-)
-    | `-CompoundStatement
-    |   |-{
-    |   |-ContinueStatement
-    |   | |-continue
-    |   | `-;
-    |   |-BreakStatement
-    |   | |-break
-    |   | `-;
-    |   `-}
-    `-}
-)txt"));
+      {R"txt(
+WhileStatement
+|-while
+|-(
+|-IntegerLiteralExpression
+| `-1
+|-)
+`-CompoundStatement
+  |-{
+  |-ContinueStatement
+  | |-continue
+  | `-;
+  |-BreakStatement
+  | |-break
+  | `-;
+  `-}
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, UnhandledStatement) {
   // Unhandled statements should end up as 'unknown statement'.
   // This example uses a 'label statement', which does not yet have a syntax
   // counterpart.
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
-int main() {
-  foo: return 100;
+int test() {
+  [[foo: return 100;]]
 }
 )cpp",
-      R"txt(
-*: TranslationUnit
-`-SimpleDeclaration
-  |-int
-  |-SimpleDeclarator
-  | |-main
-  | `-ParametersAndQualifiers
-  |   |-(
-  |   `-)
-  `-CompoundStatement
-    |-{
-    |-UnknownStatement
-    | |-foo
-    | |-:
-    | `-ReturnStatement
-    |   |-return
-    |   |-IntegerLiteralExpression
-    |   | `-100
-    |   `-;
-    `-}
-)txt"));
+      {R"txt(
+UnknownStatement
+|-foo
+|-:
+`-ReturnStatement
+  |-return
+  |-IntegerLiteralExpression
+  | `-100
+  `-;
+)txt"}));
 }
 
 TEST_P(SyntaxTreeTest, Expressions) {
@@ -902,6 +816,68 @@ UnknownExpression
 |   `->
 |-(
 `-)
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, This_Simple) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct S {
+  S* test(){
+    return [[this]];
+  }
+};
+)cpp",
+      {R"txt(
+ThisExpression
+`-this
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, This_ExplicitMemberAccess) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct S {
+  int a;
+  void test(){
+    [[this->a]];
+  }
+};
+)cpp",
+      {R"txt(
+MemberExpression
+|-ThisExpression
+| `-this
+|-->
+`-IdExpression
+  `-UnqualifiedId
+    `-a
+)txt"}));
+}
+
+TEST_P(SyntaxTreeTest, This_ImplicitMemberAccess) {
+  if (!GetParam().isCXX()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+struct S {
+  int a;
+  void test(){
+    [[a]];
+  }
+};
+)cpp",
+      {R"txt(
+IdExpression
+`-UnqualifiedId
+  `-a
 )txt"}));
 }
 
@@ -2096,29 +2072,6 @@ UnknownExpression
 |     `-!
 |-(
 `-)
-)txt"}));
-}
-
-TEST_P(SyntaxTreeTest, MemberExpression_Implicit) {
-  if (!GetParam().isCXX()) {
-    return;
-  }
-  EXPECT_TRUE(treeDumpEqualOnAnnotations(
-      R"cpp(
-struct S {
-  int a;
-  int test(){
-    // FIXME: Remove the `UnknownExpression` wrapping `a`. This
-    // `UnknownExpression` comes from an implicit leaf `CXXThisExpr`.
-    [[a]];
-  }
-};
-)cpp",
-      {R"txt(
-IdExpression
-`-UnqualifiedId
-  `-UnknownExpression
-    `-a
 )txt"}));
 }
 
