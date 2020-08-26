@@ -1803,25 +1803,15 @@ HexagonTargetLowering::PerformHvxDAGCombine(SDNode *N, DAGCombinerInfo &DCI)
 }
 
 bool
-HexagonTargetLowering::isHvxOperation(SDValue Op) const {
-  // If the type of the result, or any operand type are HVX vector types,
-  // this is an HVX operation.
-  return Subtarget.isHVXVectorType(ty(Op), true) ||
-         llvm::any_of(Op.getNode()->ops(),
-                      [this] (SDValue V) {
-                        return Subtarget.isHVXVectorType(ty(V), true);
-                      });
-}
-
-bool
 HexagonTargetLowering::isHvxOperation(SDNode *N) const {
   // If the type of any result, or any operand type are HVX vector types,
   // this is an HVX operation.
   auto IsHvxTy = [this] (EVT Ty) {
     return Ty.isSimple() && Subtarget.isHVXVectorType(Ty.getSimpleVT(), true);
   };
-  auto IsHvxOp = [this] (SDValue Op) {
-    return Subtarget.isHVXVectorType(ty(Op), true);
+  auto IsHvxOp = [this](SDValue Op) {
+    return Op.getValueType().isSimple() &&
+           Subtarget.isHVXVectorType(ty(Op), true);
   };
   return llvm::any_of(N->values(), IsHvxTy) || llvm::any_of(N->ops(), IsHvxOp);
 }
