@@ -1320,7 +1320,7 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
            "Splatted expr doesn't match with vector element type?");
 
     // Splat the element across to all elements
-    unsigned NumElements = cast<llvm::VectorType>(DstTy)->getNumElements();
+    unsigned NumElements = cast<llvm::FixedVectorType>(DstTy)->getNumElements();
     return Builder.CreateVectorSplat(NumElements, Src, "splat");
   }
 
@@ -1553,12 +1553,12 @@ Value *ScalarExprEmitter::VisitShuffleVectorExpr(ShuffleVectorExpr *E) {
     Value *RHS = CGF.EmitScalarExpr(E->getExpr(1));
     Value *Mask;
 
-    llvm::VectorType *LTy = cast<llvm::VectorType>(LHS->getType());
+    auto *LTy = cast<llvm::FixedVectorType>(LHS->getType());
     unsigned LHSElts = LTy->getNumElements();
 
     Mask = RHS;
 
-    llvm::VectorType *MTy = cast<llvm::VectorType>(Mask->getType());
+    auto *MTy = cast<llvm::FixedVectorType>(Mask->getType());
 
     // Mask off the high bits of each shuffle index.
     Value *MaskBits =
@@ -1763,7 +1763,7 @@ Value *ScalarExprEmitter::VisitInitListExpr(InitListExpr *E) {
     return Visit(E->getInit(0));
   }
 
-  unsigned ResElts = VType->getNumElements();
+  unsigned ResElts = cast<llvm::FixedVectorType>(VType)->getNumElements();
 
   // Loop over initializers collecting the Value for each, and remembering
   // whether the source was swizzle (ExtVectorElementExpr).  This will allow
@@ -1787,7 +1787,8 @@ Value *ScalarExprEmitter::VisitInitListExpr(InitListExpr *E) {
       if (isa<ExtVectorElementExpr>(IE)) {
         llvm::ExtractElementInst *EI = cast<llvm::ExtractElementInst>(Init);
 
-        if (EI->getVectorOperandType()->getNumElements() == ResElts) {
+        if (cast<llvm::FixedVectorType>(EI->getVectorOperandType())
+                ->getNumElements() == ResElts) {
           llvm::ConstantInt *C = cast<llvm::ConstantInt>(EI->getIndexOperand());
           Value *LHS = nullptr, *RHS = nullptr;
           if (CurIdx == 0) {
@@ -1825,7 +1826,7 @@ Value *ScalarExprEmitter::VisitInitListExpr(InitListExpr *E) {
       continue;
     }
 
-    unsigned InitElts = VVT->getNumElements();
+    unsigned InitElts = cast<llvm::FixedVectorType>(VVT)->getNumElements();
 
     // If the initializer is an ExtVecEltExpr (a swizzle), and the swizzle's
     // input is the same width as the vector being constructed, generate an
@@ -1834,7 +1835,7 @@ Value *ScalarExprEmitter::VisitInitListExpr(InitListExpr *E) {
     if (isa<ExtVectorElementExpr>(IE)) {
       llvm::ShuffleVectorInst *SVI = cast<llvm::ShuffleVectorInst>(Init);
       Value *SVOp = SVI->getOperand(0);
-      llvm::VectorType *OpTy = cast<llvm::VectorType>(SVOp->getType());
+      auto *OpTy = cast<llvm::FixedVectorType>(SVOp->getType());
 
       if (OpTy->getNumElements() == ResElts) {
         for (unsigned j = 0; j != CurIdx; ++j) {
@@ -2000,6 +2001,34 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
           CGF.getDebugInfo()->addHeapAllocSiteMetadata(CI, PointeeType,
                                                        CE->getExprLoc());
       }
+    }
+
+    // Perform VLAT <-> VLST bitcast through memory.
+    if ((isa<llvm::FixedVectorType>(SrcTy) &&
+         isa<llvm::ScalableVectorType>(DstTy)) ||
+        (isa<llvm::ScalableVectorType>(SrcTy) &&
+         isa<llvm::FixedVectorType>(DstTy))) {
+      if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
+        // Call expressions can't have a scalar return unless the return type
+        // is a reference type so an lvalue can't be emitted. Create a temp
+        // alloca to store the call, bitcast the address then load.
+        QualType RetTy = CE->getCallReturnType(CGF.getContext());
+        Address Addr =
+            CGF.CreateDefaultAlignTempAlloca(SrcTy, "saved-call-rvalue");
+        LValue LV = CGF.MakeAddrLValue(Addr, RetTy);
+        CGF.EmitStoreOfScalar(Src, LV);
+        Addr = Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(DestTy),
+                                            "castFixedSve");
+        LValue DestLV = CGF.MakeAddrLValue(Addr, DestTy);
+        DestLV.setTBAAInfo(TBAAAccessInfo::getMayAliasInfo());
+        return EmitLoadOfLValue(DestLV, CE->getExprLoc());
+      }
+
+      Address Addr = EmitLValue(E).getAddress(CGF);
+      Addr = Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(DestTy));
+      LValue DestLV = CGF.MakeAddrLValue(Addr, DestTy);
+      DestLV.setTBAAInfo(TBAAAccessInfo::getMayAliasInfo());
+      return EmitLoadOfLValue(DestLV, CE->getExprLoc());
     }
 
     return Builder.CreateBitCast(Src, DstTy);
@@ -2170,7 +2199,7 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     llvm::Type *DstTy = ConvertType(DestTy);
     Value *Elt = Visit(const_cast<Expr*>(E));
     // Splat the element across to all elements
-    unsigned NumElements = cast<llvm::VectorType>(DstTy)->getNumElements();
+    unsigned NumElements = cast<llvm::FixedVectorType>(DstTy)->getNumElements();
     return Builder.CreateVectorSplat(NumElements, Elt, "splat");
   }
 
@@ -3719,10 +3748,14 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
   if (Ops.LHS->getType() != RHS->getType())
     RHS = Builder.CreateIntCast(RHS, Ops.LHS->getType(), false, "sh_prom");
 
-  bool SanitizeBase = CGF.SanOpts.has(SanitizerKind::ShiftBase) &&
-                      Ops.Ty->hasSignedIntegerRepresentation() &&
-                      !CGF.getLangOpts().isSignedOverflowDefined() &&
-                      !CGF.getLangOpts().CPlusPlus20;
+  bool SanitizeSignedBase = CGF.SanOpts.has(SanitizerKind::ShiftBase) &&
+                            Ops.Ty->hasSignedIntegerRepresentation() &&
+                            !CGF.getLangOpts().isSignedOverflowDefined() &&
+                            !CGF.getLangOpts().CPlusPlus20;
+  bool SanitizeUnsignedBase =
+      CGF.SanOpts.has(SanitizerKind::UnsignedShiftBase) &&
+      Ops.Ty->hasUnsignedIntegerRepresentation();
+  bool SanitizeBase = SanitizeSignedBase || SanitizeUnsignedBase;
   bool SanitizeExponent = CGF.SanOpts.has(SanitizerKind::ShiftExponent);
   // OpenCL 6.3j: shift values are effectively % word size of LHS.
   if (CGF.getLangOpts().OpenCL)
@@ -3755,11 +3788,12 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
           Ops.LHS, Builder.CreateSub(PromotedWidthMinusOne, RHS, "shl.zeros",
                                      /*NUW*/ true, /*NSW*/ true),
           "shl.check");
-      if (CGF.getLangOpts().CPlusPlus) {
+      if (SanitizeUnsignedBase || CGF.getLangOpts().CPlusPlus) {
         // In C99, we are not permitted to shift a 1 bit into the sign bit.
         // Under C++11's rules, shifting a 1 bit into the sign bit is
         // OK, but shifting a 1 bit out of it is not. (C89 and C++03 don't
         // define signed left shifts, so we use the C99 and C++11 rules there).
+        // Unsigned shifts can always shift into the top bit.
         llvm::Value *One = llvm::ConstantInt::get(BitsShiftedOff->getType(), 1);
         BitsShiftedOff = Builder.CreateLShr(BitsShiftedOff, One);
       }
@@ -3769,7 +3803,9 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
       llvm::PHINode *BaseCheck = Builder.CreatePHI(ValidBase->getType(), 2);
       BaseCheck->addIncoming(Builder.getTrue(), Orig);
       BaseCheck->addIncoming(ValidBase, CheckShiftBase);
-      Checks.push_back(std::make_pair(BaseCheck, SanitizerKind::ShiftBase));
+      Checks.push_back(std::make_pair(
+          BaseCheck, SanitizeSignedBase ? SanitizerKind::ShiftBase
+                                        : SanitizerKind::UnsignedShiftBase));
     }
 
     assert(!Checks.empty());
@@ -4331,7 +4367,7 @@ VisitAbstractConditionalOperator(const AbstractConditionalOperator *E) {
     llvm::Value *RHS = Visit(rhsExpr);
 
     llvm::Type *condType = ConvertType(condExpr->getType());
-    llvm::VectorType *vecTy = cast<llvm::VectorType>(condType);
+    auto *vecTy = cast<llvm::FixedVectorType>(condType);
 
     unsigned numElem = vecTy->getNumElements();
     llvm::Type *elemType = vecTy->getElementType();
@@ -4534,10 +4570,14 @@ Value *ScalarExprEmitter::VisitAsTypeExpr(AsTypeExpr *E) {
   llvm::Type *DstTy = ConvertType(E->getType());
 
   llvm::Type *SrcTy = Src->getType();
-  unsigned NumElementsSrc = isa<llvm::VectorType>(SrcTy) ?
-    cast<llvm::VectorType>(SrcTy)->getNumElements() : 0;
-  unsigned NumElementsDst = isa<llvm::VectorType>(DstTy) ?
-    cast<llvm::VectorType>(DstTy)->getNumElements() : 0;
+  unsigned NumElementsSrc =
+      isa<llvm::VectorType>(SrcTy)
+          ? cast<llvm::FixedVectorType>(SrcTy)->getNumElements()
+          : 0;
+  unsigned NumElementsDst =
+      isa<llvm::VectorType>(DstTy)
+          ? cast<llvm::FixedVectorType>(DstTy)->getNumElements()
+          : 0;
 
   // Going from vec3 to non-vec3 is a special case and requires a shuffle
   // vector to get a vec4, then a bitcast if the target type is different.

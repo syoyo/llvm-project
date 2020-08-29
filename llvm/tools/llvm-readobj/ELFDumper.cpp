@@ -987,33 +987,27 @@ private:
 namespace llvm {
 
 template <class ELFT>
-static std::error_code createELFDumper(const ELFObjectFile<ELFT> *Obj,
-                                       ScopedPrinter &Writer,
-                                       std::unique_ptr<ObjDumper> &Result) {
-  Result.reset(new ELFDumper<ELFT>(Obj, Writer));
-  return readobj_error::success;
+static std::unique_ptr<ObjDumper> createELFDumper(const ELFObjectFile<ELFT> &Obj,
+                                           ScopedPrinter &Writer) {
+  return std::make_unique<ELFDumper<ELFT>>(&Obj, Writer);
 }
 
-std::error_code createELFDumper(const object::ObjectFile *Obj,
-                                ScopedPrinter &Writer,
-                                std::unique_ptr<ObjDumper> &Result) {
+std::unique_ptr<ObjDumper> createELFDumper(const object::ELFObjectFileBase &Obj,
+                                           ScopedPrinter &Writer) {
   // Little-endian 32-bit
-  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
-    return createELFDumper(ELFObj, Writer, Result);
+  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(&Obj))
+    return createELFDumper(*ELFObj, Writer);
 
   // Big-endian 32-bit
-  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
-    return createELFDumper(ELFObj, Writer, Result);
+  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(&Obj))
+    return createELFDumper(*ELFObj, Writer);
 
   // Little-endian 64-bit
-  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
-    return createELFDumper(ELFObj, Writer, Result);
+  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(&Obj))
+    return createELFDumper(*ELFObj, Writer);
 
   // Big-endian 64-bit
-  if (const ELF64BEObjectFile *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
-    return createELFDumper(ELFObj, Writer, Result);
-
-  return readobj_error::unsupported_obj_file_format;
+  return createELFDumper(*cast<ELF64BEObjectFile>(&Obj), Writer);
 }
 
 } // end namespace llvm
@@ -1319,11 +1313,6 @@ static const EnumEntry<unsigned> ElfOSABI[] = {
   {"CloudABI",     "CloudABI",             ELF::ELFOSABI_CLOUDABI},
   {"Standalone",   "Standalone App",       ELF::ELFOSABI_STANDALONE}
 };
-
-static const EnumEntry<unsigned> SymVersionFlags[] = {
-    {"Base", "BASE", VER_FLG_BASE},
-    {"Weak", "WEAK", VER_FLG_WEAK},
-    {"Info", "INFO", VER_FLG_INFO}};
 
 static const EnumEntry<unsigned> AMDGPUElfOSABI[] = {
   {"AMDGPU_HSA",    "AMDGPU - HSA",    ELF::ELFOSABI_AMDGPU_HSA},
@@ -6297,20 +6286,21 @@ void LLVMStyle<ELFT>::printSectionHeaders(const ELFO *Obj) {
 
     if (opts::SectionSymbols) {
       ListScope D(W, "Symbols");
-      const Elf_Shdr *Symtab = this->dumper()->getDotSymtabSec();
-      StringRef StrTable =
-          unwrapOrError(this->FileName, Obj->getStringTableForSymtab(*Symtab));
+      if (const Elf_Shdr *Symtab = this->dumper()->getDotSymtabSec()) {
+        StringRef StrTable = unwrapOrError(
+            this->FileName, Obj->getStringTableForSymtab(*Symtab));
 
-      for (const Elf_Sym &Sym :
-           unwrapOrError(this->FileName, Obj->symbols(Symtab))) {
-        const Elf_Shdr *SymSec = unwrapOrError(
-            this->FileName,
-            Obj->getSection(&Sym, Symtab, this->dumper()->getShndxTable()));
-        if (SymSec == &Sec)
-          printSymbol(
-              Obj, &Sym,
-              unwrapOrError(this->FileName, Obj->symbols(Symtab)).begin(),
-              StrTable, false, false);
+        for (const Elf_Sym &Sym :
+             unwrapOrError(this->FileName, Obj->symbols(Symtab))) {
+          const Elf_Shdr *SymSec = unwrapOrError(
+              this->FileName,
+              Obj->getSection(&Sym, Symtab, this->dumper()->getShndxTable()));
+          if (SymSec == &Sec)
+            printSymbol(
+                Obj, &Sym,
+                unwrapOrError(this->FileName, Obj->symbols(Symtab)).begin(),
+                StrTable, false, false);
+        }
       }
     }
 
@@ -6564,6 +6554,11 @@ void LLVMStyle<ELFT>::printVersionSymbolSection(const ELFFile<ELFT> *Obj,
                               &Syms[I], StrTable, /*IsDynamic=*/true));
   }
 }
+
+static const EnumEntry<unsigned> SymVersionFlags[] = {
+    {"Base", "BASE", VER_FLG_BASE},
+    {"Weak", "WEAK", VER_FLG_WEAK},
+    {"Info", "INFO", VER_FLG_INFO}};
 
 template <class ELFT>
 void LLVMStyle<ELFT>::printVersionDefinitionSection(const ELFFile<ELFT> *Obj,

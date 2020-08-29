@@ -225,6 +225,24 @@ def select_same_val: GICombineRule<
   (apply [{ return Helper.replaceSingleDefInstWithOperand(*${root}, 2); }])
 >;
 
+// Fold (undef ? x : y) -> y
+def select_undef_cmp: GICombineRule<
+  (defs root:$root),
+  (match (wip_match_opcode G_SELECT):$root,
+    [{ return Helper.matchUndefSelectCmp(*${root}); }]),
+  (apply [{ return Helper.replaceSingleDefInstWithOperand(*${root}, 2); }])
+>;
+
+// Fold (true ? x : y) -> x
+// Fold (false ? x : y) -> y
+def select_constant_cmp_matchdata : GIDefMatchData<"unsigned">;
+def select_constant_cmp: GICombineRule<
+  (defs root:$root, select_constant_cmp_matchdata:$matchinfo),
+  (match (wip_match_opcode G_SELECT):$root,
+    [{ return Helper.matchConstantSelectCmp(*${root}, ${matchinfo}); }]),
+  (apply [{ return Helper.replaceSingleDefInstWithOperand(*${root}, ${matchinfo}); }])
+>;
+
 // Fold x op 0 -> x
 def right_identity_zero: GICombineRule<
   (defs root:$root),
@@ -291,6 +309,16 @@ def i2p_to_p2i: GICombineRule<
   (apply [{ return Helper.applyCombineP2IToI2P(*${root}, ${info}); }])
 >;
 
+// Fold add ptrtoint(x), y -> ptrtoint (ptr_add x), y
+def add_p2i_to_ptradd_matchinfo : GIDefMatchData<"std::pair<Register, bool>">;
+def add_p2i_to_ptradd : GICombineRule<
+  (defs root:$root, add_p2i_to_ptradd_matchinfo:$info),
+  (match (wip_match_opcode G_ADD):$root,
+    [{ return Helper.matchCombineAddP2IToPtrAdd(*${root}, ${info}); }]),
+  (apply [{ return Helper.applyCombineAddP2IToPtrAdd(*${root}, ${info}); }])
+>;
+
+
 // Simplify: (logic_op (op x...), (op y...)) -> (op (logic_op x, y))
 def hoist_logic_op_with_same_opcode_hands: GICombineRule <
   (defs root:$root, instruction_steps_matchdata:$info),
@@ -316,6 +344,16 @@ def and_trivial_mask: GICombineRule <
   (apply [{ return Helper.replaceSingleDefInstWithReg(*${root}, ${matchinfo}); }])
 >;
 
+// If the input is already sign extended, just drop the extension.
+// sext_inreg x, K ->
+//   if computeNumSignBits(x) >= (x.getScalarSizeInBits() - K + 1)
+def redundant_sext_inreg: GICombineRule <
+  (defs root:$root),
+  (match (wip_match_opcode G_SEXT_INREG):$root,
+         [{ return Helper.matchRedundantSExtInReg(*${root}); }]),
+     (apply [{ return Helper.replaceSingleDefInstWithOperand(*${root}, 1); }])
+>;
+
 // FIXME: These should use the custom predicate feature once it lands.
 def undef_combines : GICombineGroup<[undef_to_fp_zero, undef_to_int_zero,
                                      undef_to_negative_one,
@@ -329,12 +367,18 @@ def identity_combines : GICombineGroup<[select_same_val, right_identity_zero,
                                         binop_right_to_zero, p2i_to_i2p,
                                         i2p_to_p2i]>;
 
+def known_bits_simplifications : GICombineGroup<[
+  and_trivial_mask, redundant_sext_inreg]>;
+
 def width_reduction_combines : GICombineGroup<[reduce_shl_of_extend]>;
 
-def trivial_combines : GICombineGroup<[copy_prop, mul_to_shl]>;
+def select_combines : GICombineGroup<[select_undef_cmp, select_constant_cmp]>;
+
+def trivial_combines : GICombineGroup<[copy_prop, mul_to_shl, add_p2i_to_ptradd]>;
 def all_combines : GICombineGroup<[trivial_combines, ptr_add_immed_chain,
     combines_for_extload, combine_indexed_load_store, undef_combines,
     identity_combines, simplify_add_to_sub,
     hoist_logic_op_with_same_opcode_hands,
     shl_ashr_to_sext_inreg, sext_inreg_of_load,
-    width_reduction_combines]>;
+    width_reduction_combines, select_combines,
+    known_bits_simplifications]>;

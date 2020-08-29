@@ -698,7 +698,7 @@ def emit_ast : Flag<["-"], "emit-ast">,
 def emit_llvm : Flag<["-"], "emit-llvm">, Flags<[CC1Option]>, Group<Action_Group>,
   HelpText<"Use the LLVM representation for assembler and object files">;
 def emit_interface_stubs : Flag<["-"], "emit-interface-stubs">, Flags<[CC1Option]>, Group<Action_Group>,
-  HelpText<"Generate Inteface Stub Files.">;
+  HelpText<"Generate Interface Stub Files.">;
 def emit_merged_ifs : Flag<["-"], "emit-merged-ifs">,
   Flags<[CC1Option]>, Group<Action_Group>,
   HelpText<"Generate Interface Stub Files, emit merged text not binary.">;
@@ -994,6 +994,8 @@ defm cxx_static_destructors : OptOutFFlag<"c++-static-destructors", "",
   "Disable C++ static destructor registration">;
 def fsymbol_partition_EQ : Joined<["-"], "fsymbol-partition=">, Group<f_Group>,
   Flags<[CC1Option]>;
+
+defm memprof : OptInFFlag<"memprof", "Enable", "Disable", " heap memory profiling">;
 
 // Begin sanitizer flags. These should all be core options exposed in all driver
 // modes.
@@ -1809,7 +1811,7 @@ def fstack_protector : Flag<["-"], "fstack-protector">, Group<f_Group>,
            "This uses a loose heuristic which considers functions vulnerable if they "
            "contain a char (or 8bit integer) array or constant sized calls to alloca "
            ", which are of greater size than ssp-buffer-size (default: 8 bytes). All "
-           "variable sized calls to alloca are considered vulnerable. A function with"
+           "variable sized calls to alloca are considered vulnerable. A function with "
            "a stack protector has a guard value added to the stack frame that is "
            "checked on function exit. The guard value must be positioned in the "
            "stack frame such that a buffer overflow from a vulnerable variable will "
@@ -4746,6 +4748,8 @@ def _SLASH_TC : CLCompileFlag<"TC">, HelpText<"Treat all source files as C">;
 def _SLASH_Tp : CLCompileJoinedOrSeparate<"Tp">,
   HelpText<"Treat <file> as C++ source file">, MetaVarName<"<file>">;
 def _SLASH_TP : CLCompileFlag<"TP">, HelpText<"Treat all source files as C++">;
+def _SLASH_vctoolsdir : CLJoinedOrSeparate<"vctoolsdir">,
+  HelpText<"Path to the VCToolChain">, MetaVarName<"<dir>">;
 def _SLASH_volatile_iso : Option<["/", "-"], "volatile:iso", KIND_FLAG>,
   Group<_SLASH_volatile_Group>, Flags<[CLOption, DriverOption]>,
   HelpText<"Volatile loads and stores have standard semantics">;

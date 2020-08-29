@@ -276,14 +276,14 @@ syntax::List::getElementsAsNodesAndDelimiters() {
   syntax::Node *elementWithoutDelimiter = nullptr;
   for (auto *C = firstChild(); C; C = C->nextSibling()) {
     switch (C->role()) {
-    case syntax::NodeRole::List_element: {
+    case syntax::NodeRole::ListElement: {
       if (elementWithoutDelimiter) {
         children.push_back({elementWithoutDelimiter, nullptr});
       }
       elementWithoutDelimiter = C;
       break;
     }
-    case syntax::NodeRole::List_delimiter: {
+    case syntax::NodeRole::ListDelimiter: {
       children.push_back({elementWithoutDelimiter, cast<syntax::Leaf>(C)});
       elementWithoutDelimiter = nullptr;
       break;
@@ -321,14 +321,14 @@ std::vector<syntax::Node *> syntax::List::getElementsAsNodes() {
   syntax::Node *elementWithoutDelimiter = nullptr;
   for (auto *C = firstChild(); C; C = C->nextSibling()) {
     switch (C->role()) {
-    case syntax::NodeRole::List_element: {
+    case syntax::NodeRole::ListElement: {
       if (elementWithoutDelimiter) {
         children.push_back(elementWithoutDelimiter);
       }
       elementWithoutDelimiter = C;
       break;
     }
-    case syntax::NodeRole::List_delimiter: {
+    case syntax::NodeRole::ListDelimiter: {
       children.push_back(elementWithoutDelimiter);
       elementWithoutDelimiter = nullptr;
       break;
@@ -359,6 +359,9 @@ clang::tok::TokenKind syntax::List::getDelimiterTokenKind() {
   switch (this->kind()) {
   case NodeKind::NestedNameSpecifier:
     return clang::tok::coloncolon;
+  case NodeKind::CallArguments:
+  case NodeKind::ParametersAndQualifiers:
+    return clang::tok::comma;
   default:
     llvm_unreachable("This is not a subclass of List, thus "
                      "getDelimiterTokenKind() cannot be called");
@@ -369,6 +372,9 @@ syntax::List::TerminationKind syntax::List::getTerminationKind() {
   switch (this->kind()) {
   case NodeKind::NestedNameSpecifier:
     return TerminationKind::Terminated;
+  case NodeKind::CallArguments:
+  case NodeKind::ParametersAndQualifiers:
+    return TerminationKind::Separated;
   default:
     llvm_unreachable("This is not a subclass of List, thus "
                      "getTerminationKind() cannot be called");
@@ -379,6 +385,10 @@ bool syntax::List::canBeEmpty() {
   switch (this->kind()) {
   case NodeKind::NestedNameSpecifier:
     return false;
+  case NodeKind::CallArguments:
+    return true;
+  case NodeKind::ParametersAndQualifiers:
+    return true;
   default:
     llvm_unreachable("This is not a subclass of List, thus canBeEmpty() "
                      "cannot be called");
