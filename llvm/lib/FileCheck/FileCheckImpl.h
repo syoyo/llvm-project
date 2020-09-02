@@ -12,13 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_SUPPORT_FILECHECKIMPL_H
-#define LLVM_LIB_SUPPORT_FILECHECKIMPL_H
+#ifndef LLVM_LIB_FILECHECK_FILECHECKIMPL_H
+#define LLVM_LIB_FILECHECK_FILECHECKIMPL_H
 
-#include "llvm/Support/FileCheck.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/FileCheck/FileCheck.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/SourceMgr.h"
 #include <map>
@@ -53,15 +53,17 @@ struct ExpressionFormat {
 
 private:
   Kind Value;
+  unsigned Precision = 0;
 
 public:
   /// Evaluates a format to true if it can be used in a match.
   explicit operator bool() const { return Value != Kind::NoFormat; }
 
   /// Define format equality: formats are equal if neither is NoFormat and
-  /// their kinds are the same.
+  /// their kinds and precision are the same.
   bool operator==(const ExpressionFormat &Other) const {
-    return Value != Kind::NoFormat && Value == Other.Value;
+    return Value != Kind::NoFormat && Value == Other.Value &&
+           Precision == Other.Precision;
   }
 
   bool operator!=(const ExpressionFormat &Other) const {
@@ -76,12 +78,14 @@ public:
   StringRef toString() const;
 
   ExpressionFormat() : Value(Kind::NoFormat){};
-  explicit ExpressionFormat(Kind Value) : Value(Value){};
+  explicit ExpressionFormat(Kind Value) : Value(Value), Precision(0){};
+  explicit ExpressionFormat(Kind Value, unsigned Precision)
+      : Value(Value), Precision(Precision){};
 
-  /// \returns a wildcard regular expression StringRef that matches any value
-  /// in the format represented by this instance, or an error if the format is
-  /// NoFormat.
-  Expected<StringRef> getWildcardRegex() const;
+  /// \returns a wildcard regular expression string that matches any value in
+  /// the format represented by this instance and no other value, or an error
+  /// if the format is NoFormat.
+  Expected<std::string> getWildcardRegex() const;
 
   /// \returns the string representation of \p Value in the format represented
   /// by this instance, or an error if conversion to this format failed or the
