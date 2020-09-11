@@ -134,18 +134,14 @@ static Value buildVectorComparison(ConversionPatternRewriter &rewriter,
   Value indices;
   Type idxType;
   if (enableIndexOptimizations) {
-    SmallVector<int32_t, 4> values(dim);
-    for (int64_t d = 0; d < dim; d++)
-      values[d] = d;
-    indices =
-        rewriter.create<ConstantOp>(loc, rewriter.getI32VectorAttr(values));
+    indices = rewriter.create<ConstantOp>(
+        loc, rewriter.getI32VectorAttr(
+                 llvm::to_vector<4>(llvm::seq<int32_t>(0, dim))));
     idxType = rewriter.getI32Type();
   } else {
-    SmallVector<int64_t, 4> values(dim);
-    for (int64_t d = 0; d < dim; d++)
-      values[d] = d;
-    indices =
-        rewriter.create<ConstantOp>(loc, rewriter.getI64VectorAttr(values));
+    indices = rewriter.create<ConstantOp>(
+        loc, rewriter.getI64VectorAttr(
+                 llvm::to_vector<4>(llvm::seq<int64_t>(0, dim))));
     idxType = rewriter.getI64Type();
   }
   // Add in an offset if requested.
@@ -202,7 +198,7 @@ static LogicalResult getBasePtr(ConversionPatternRewriter &rewriter,
   Value base;
   if (failed(getBase(rewriter, loc, memref, memRefType, base)))
     return failure();
-  auto pType = MemRefDescriptor(memref).getElementType();
+  auto pType = MemRefDescriptor(memref).getElementPtrType();
   ptr = rewriter.create<LLVM::GEPOp>(loc, pType, base);
   return success();
 }
@@ -229,7 +225,7 @@ static LogicalResult getIndexedPtrs(ConversionPatternRewriter &rewriter,
   Value base;
   if (failed(getBase(rewriter, loc, memref, memRefType, base)))
     return failure();
-  auto pType = MemRefDescriptor(memref).getElementType();
+  auto pType = MemRefDescriptor(memref).getElementPtrType();
   auto ptrsType = LLVM::LLVMType::getVectorTy(pType, vType.getDimSize(0));
   ptrs = rewriter.create<LLVM::GEPOp>(loc, ptrsType, base, indices);
   return success();
@@ -451,11 +447,9 @@ public:
       return failure();
 
     // Replace with the gather intrinsic.
-    ValueRange v = (llvm::size(adaptor.pass_thru()) == 0) ? ValueRange({})
-                                                          : adaptor.pass_thru();
     rewriter.replaceOpWithNewOp<LLVM::masked_gather>(
-        gather, typeConverter.convertType(vType), ptrs, adaptor.mask(), v,
-        rewriter.getI32IntegerAttr(align));
+        gather, typeConverter.convertType(vType), ptrs, adaptor.mask(),
+        adaptor.pass_thru(), rewriter.getI32IntegerAttr(align));
     return success();
   }
 };
@@ -1102,7 +1096,7 @@ static bool isContiguous(MemRefType memRefType,
                          SmallVectorImpl<int64_t> &strides) {
   int64_t offset;
   auto successStrides = getStridesAndOffset(memRefType, strides, offset);
-  bool isContiguous = (strides.back() == 1);
+  bool isContiguous = strides.empty() || strides.back() == 1;
   if (isContiguous) {
     auto sizes = memRefType.getShape();
     for (int index = 0, e = strides.size() - 2; index < e; ++index) {
@@ -1157,7 +1151,7 @@ public:
 
     // Create descriptor.
     auto desc = MemRefDescriptor::undef(rewriter, loc, llvmTargetDescriptorTy);
-    Type llvmTargetElementTy = desc.getElementType();
+    Type llvmTargetElementTy = desc.getElementPtrType();
     // Set allocated ptr.
     Value allocated = sourceMemRef.allocatedPtr(rewriter, loc);
     allocated =
@@ -1282,7 +1276,7 @@ public:
     //       dimensions here.
     unsigned vecWidth = vecTy.getVectorNumElements();
     unsigned lastIndex = llvm::size(xferOp.indices()) - 1;
-    Value off = *(xferOp.indices().begin() + lastIndex);
+    Value off = xferOp.indices()[lastIndex];
     Value dim = rewriter.create<DimOp>(loc, xferOp.memref(), lastIndex);
     Value mask = buildVectorComparison(rewriter, op, enableIndexOptimizations,
                                        vecWidth, dim, &off);
