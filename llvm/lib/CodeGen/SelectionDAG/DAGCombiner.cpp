@@ -5574,25 +5574,6 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
     if (SDValue V = combineShiftAnd1ToBitTest(N, DAG))
       return V;
 
-  // fold (and (ctpop X), 1) -> parity X
-  // Only do this before op legalization as it might be turned back into ctpop.
-  // TODO: Support vectors?
-  if (!LegalOperations && isOneConstant(N1) && N0.hasOneUse()) {
-    SDValue Tmp = N0;
-
-    // It's possible the ctpop has been truncated, but since we only care about
-    // the LSB we can look through it.
-    if (Tmp.getOpcode() == ISD::TRUNCATE && Tmp.getOperand(0).hasOneUse())
-      Tmp = Tmp.getOperand(0);
-
-    if (Tmp.getOpcode() == ISD::CTPOP) {
-      SDLoc dl(N);
-      SDValue Parity =
-          DAG.getNode(ISD::PARITY, dl, Tmp.getValueType(), Tmp.getOperand(0));
-      return DAG.getNode(ISD::TRUNCATE, dl, VT, Parity);
-    }
-  }
-
   return SDValue();
 }
 
@@ -13185,11 +13166,11 @@ SDValue DAGCombiner::visitFMA(SDNode *N) {
     if (N1CFP && N1CFP->isZero())
       return N2;
   }
-  // TODO: The FMA node should have flags that propagate to these nodes.
+
   if (N0CFP && N0CFP->isExactlyValue(1.0))
-    return DAG.getNode(ISD::FADD, SDLoc(N), VT, N1, N2);
+    return DAG.getNode(ISD::FADD, SDLoc(N), VT, N1, N2, Flags);
   if (N1CFP && N1CFP->isExactlyValue(1.0))
-    return DAG.getNode(ISD::FADD, SDLoc(N), VT, N0, N2);
+    return DAG.getNode(ISD::FADD, SDLoc(N), VT, N0, N2, Flags);
 
   // Canonicalize (fma c, x, y) -> (fma x, c, y)
   if (isConstantFPBuildVectorOrConstantFP(N0) &&
@@ -13218,19 +13199,16 @@ SDValue DAGCombiner::visitFMA(SDNode *N) {
     }
   }
 
-  // (fma x, 1, y) -> (fadd x, y)
   // (fma x, -1, y) -> (fadd (fneg x), y)
   if (N1CFP) {
     if (N1CFP->isExactlyValue(1.0))
-      // TODO: The FMA node should have flags that propagate to this node.
-      return DAG.getNode(ISD::FADD, DL, VT, N0, N2);
+      return DAG.getNode(ISD::FADD, DL, VT, N0, N2, Flags);
 
     if (N1CFP->isExactlyValue(-1.0) &&
         (!LegalOperations || TLI.isOperationLegal(ISD::FNEG, VT))) {
       SDValue RHSNeg = DAG.getNode(ISD::FNEG, DL, VT, N0);
       AddToWorklist(RHSNeg.getNode());
-      // TODO: The FMA node should have flags that propagate to this node.
-      return DAG.getNode(ISD::FADD, DL, VT, N2, RHSNeg);
+      return DAG.getNode(ISD::FADD, DL, VT, N2, RHSNeg, Flags);
     }
 
     // fma (fneg x), K, y -> fma x -K, y
