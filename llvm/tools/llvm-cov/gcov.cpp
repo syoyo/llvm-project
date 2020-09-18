@@ -77,9 +77,7 @@ static void reportCoverage(StringRef SourceFile, StringRef ObjectDir,
   if (DumpGCOV)
     GF.print(errs());
 
-  FileInfo FI(Options);
-  GF.collectLineCounts(FI);
-  FI.print(llvm::outs(), SourceFile, GCNO, GCDA, GF);
+  gcovOneInput(Options, SourceFile, GCNO, GCDA, GF);
 }
 
 int gcovMain(int argc, const char *argv[]) {
@@ -116,6 +114,11 @@ int gcovMain(int argc, const char *argv[]) {
   cl::alias IntermediateA("i", cl::desc("Alias for --intermediate-format"),
                           cl::Grouping, cl::NotHidden,
                           cl::aliasopt(Intermediate));
+
+  cl::opt<bool> Demangle("demangled-names", cl::init(false),
+                         cl::desc("Demangle function names"));
+  cl::alias DemangleA("m", cl::desc("Alias for --demangled-names"),
+                      cl::Grouping, cl::NotHidden, cl::aliasopt(Demangle));
 
   cl::opt<bool> NoOutput("n", cl::Grouping, cl::init(false),
                          cl::desc("Do not output any .gcov files"));
@@ -165,8 +168,8 @@ int gcovMain(int argc, const char *argv[]) {
 
   GCOV::Options Options(AllBlocks, BranchProb, BranchCount, FuncSummary,
                         PreservePaths, UncondBranch, Intermediate, LongNames,
-                        NoOutput, RelativeOnly, UseStdout, HashFilenames,
-                        SourcePrefix);
+                        Demangle, NoOutput, RelativeOnly, UseStdout,
+                        HashFilenames, SourcePrefix);
 
   for (const auto &SourceFile : SourceFiles)
     reportCoverage(SourceFile, ObjectDir, InputGCNO, InputGCDA, DumpGCOV,
