@@ -8649,25 +8649,34 @@ static SDValue lowerBuildVectorAsBroadcast(BuildVectorSDNode *BVOp,
   // b. t1 = (build_vector t0 t0)
   //
   // Create (VBROADCASTM v2i1 X)
-  if (Subtarget.hasCDI() && (VT.is512BitVector() || Subtarget.hasVLX())) {
+  if (Subtarget.hasCDI()) {
     MVT EltType = VT.getScalarType();
     unsigned NumElts = VT.getVectorNumElements();
     SDValue BOperand;
     SDValue ZeroExtended = isSplatZeroExtended(BVOp, NumElts, EltType);
     if ((ZeroExtended && ZeroExtended.getOpcode() == ISD::BITCAST) ||
+        (ZeroExtended && ZeroExtended.getOpcode() == ISD::ZERO_EXTEND &&
+         ZeroExtended.getOperand(0).getOpcode() == ISD::BITCAST) ||
         (Ld && Ld.getOpcode() == ISD::ZERO_EXTEND &&
          Ld.getOperand(0).getOpcode() == ISD::BITCAST)) {
-      if (ZeroExtended)
+      if (ZeroExtended && ZeroExtended.getOpcode() == ISD::BITCAST)
         BOperand = ZeroExtended.getOperand(0);
+      else if (ZeroExtended)
+        BOperand = ZeroExtended.getOperand(0).getOperand(0);
       else
         BOperand = Ld.getOperand(0).getOperand(0);
       MVT MaskVT = BOperand.getSimpleValueType();
-      if ((EltType == MVT::i64 && MaskVT == MVT::v8i1) || // for broadcastmb2q
+      if ((EltType == MVT::i64 && MaskVT == MVT::v8i1) ||  // for broadcastmb2q
           (EltType == MVT::i32 && MaskVT == MVT::v16i1)) { // for broadcastmw2d
-        SDValue Brdcst =
-            DAG.getNode(X86ISD::VBROADCASTM, dl,
-                        MVT::getVectorVT(EltType, NumElts), BOperand);
-        return DAG.getBitcast(VT, Brdcst);
+        MVT BcstVT = MVT::getVectorVT(EltType, NumElts);
+        if (!VT.is512BitVector() && !Subtarget.hasVLX()) {
+          unsigned Scale = 512 / VT.getSizeInBits();
+          BcstVT = MVT::getVectorVT(EltType, NumElts * Scale);
+        }
+        SDValue Bcst = DAG.getNode(X86ISD::VBROADCASTM, dl, BcstVT, BOperand);
+        if (BcstVT.getSizeInBits() != VT.getSizeInBits())
+          Bcst = extractSubVector(Bcst, 0, DAG, dl, VT.getSizeInBits());
+        return DAG.getBitcast(VT, Bcst);
       }
     }
   }
@@ -49945,7 +49954,7 @@ static X86::CondCode parseConstraintCode(llvm::StringRef Constraint) {
                            .Case("{@ccnl}", X86::COND_GE)
                            .Case("{@ccnle}", X86::COND_G)
                            .Case("{@ccno}", X86::COND_NO)
-                           .Case("{@ccnp}", X86::COND_P)
+                           .Case("{@ccnp}", X86::COND_NP)
                            .Case("{@ccns}", X86::COND_NS)
                            .Case("{@cco}", X86::COND_O)
                            .Case("{@ccp}", X86::COND_P)

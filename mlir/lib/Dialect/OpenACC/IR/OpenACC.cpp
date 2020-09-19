@@ -417,83 +417,112 @@ static void print(OpAsmPrinter &printer, ParallelOp &op) {
 //===----------------------------------------------------------------------===//
 
 /// Parse acc.data operation
-/// operation := `acc.parallel` `present` `(` value-list `)`?
-///                             `copy` `(` value-list `)`?
-///                             `copyin` `(` value-list `)`?
-///                             `copyout` `(` value-list `)`?
-///                             `create` `(` value-list `)`?
-///                             `no_create` `(` value-list `)`?
-///                             `delete` `(` value-list `)`?
-///                             `attach` `(` value-list `)`?
-///                             `detach` `(` value-list `)`?
+/// operation := `acc.parallel` (`present` `(` value-list `)`)?
+///                             (`copy` `(` value-list `)`)?
+///                             (`copyin` `(` value-list `)`)?
+///                             (`copyin_readonly` `(` value-list `)`)?
+///                             (`copyout` `(` value-list `)`)?
+///                             (`copyout_zero` `(` value-list `)`)?
+///                             (`create` `(` value-list `)`)?
+///                             (`create_zero` `(` value-list `)`)?
+///                             (`no_create` `(` value-list `)`)?
+///                             (`delete` `(` value-list `)`)?
+///                             (`attach` `(` value-list `)`)?
+///                             (`detach` `(` value-list `)`)?
 ///                             region attr-dict?
 static ParseResult parseDataOp(OpAsmParser &parser, OperationState &result) {
   Builder &builder = parser.getBuilder();
-  SmallVector<OpAsmParser::OperandType, 8> presentOperands, copyOperands,
-      copyinOperands, copyoutOperands, createOperands, noCreateOperands,
+  SmallVector<OpAsmParser::OperandType, 2> presentOperands, copyOperands,
+      copyinOperands, copyinReadonlyOperands, copyoutOperands,
+      copyoutZeroOperands, createOperands, createZeroOperands, noCreateOperands,
       deleteOperands, attachOperands, detachOperands;
-  SmallVector<Type, 8> operandsTypes;
+  SmallVector<Type, 2> presentOperandTypes, copyOperandTypes,
+      copyinOperandTypes, copyinReadonlyOperandTypes, copyoutOperandTypes,
+      copyoutZeroOperandTypes, createOperandTypes, createZeroOperandTypes,
+      noCreateOperandTypes, deleteOperandTypes, attachOperandTypes,
+      detachOperandTypes;
 
   // present(value-list)?
   if (failed(parseOperandList(parser, DataOp::getPresentKeyword(),
-                              presentOperands, operandsTypes, result)))
+                              presentOperands, presentOperandTypes, result)))
     return failure();
 
   // copy(value-list)?
   if (failed(parseOperandList(parser, DataOp::getCopyKeyword(), copyOperands,
-                              operandsTypes, result)))
+                              copyOperandTypes, result)))
     return failure();
 
   // copyin(value-list)?
   if (failed(parseOperandList(parser, DataOp::getCopyinKeyword(),
-                              copyinOperands, operandsTypes, result)))
+                              copyinOperands, copyinOperandTypes, result)))
+    return failure();
+
+  // copyin_readonly(value-list)?
+  if (failed(parseOperandList(parser, DataOp::getCopyinReadonlyKeyword(),
+                              copyinReadonlyOperands, copyinOperandTypes,
+                              result)))
     return failure();
 
   // copyout(value-list)?
   if (failed(parseOperandList(parser, DataOp::getCopyoutKeyword(),
-                              copyoutOperands, operandsTypes, result)))
+                              copyoutOperands, copyoutOperandTypes, result)))
+    return failure();
+
+  // copyout_zero(value-list)?
+  if (failed(parseOperandList(parser, DataOp::getCopyoutZeroKeyword(),
+                              copyoutZeroOperands, copyoutZeroOperandTypes,
+                              result)))
     return failure();
 
   // create(value-list)?
   if (failed(parseOperandList(parser, DataOp::getCreateKeyword(),
-                              createOperands, operandsTypes, result)))
+                              createOperands, createOperandTypes, result)))
+    return failure();
+
+  // create_zero(value-list)?
+  if (failed(parseOperandList(parser, DataOp::getCreateZeroKeyword(),
+                              createZeroOperands, createZeroOperandTypes,
+                              result)))
     return failure();
 
   // no_create(value-list)?
-  if (failed(parseOperandList(parser, DataOp::getCreateKeyword(),
-                              noCreateOperands, operandsTypes, result)))
+  if (failed(parseOperandList(parser, DataOp::getNoCreateKeyword(),
+                              noCreateOperands, noCreateOperandTypes, result)))
     return failure();
 
   // delete(value-list)?
   if (failed(parseOperandList(parser, DataOp::getDeleteKeyword(),
-                              deleteOperands, operandsTypes, result)))
+                              deleteOperands, deleteOperandTypes, result)))
     return failure();
 
   // attach(value-list)?
   if (failed(parseOperandList(parser, DataOp::getAttachKeyword(),
-                              attachOperands, operandsTypes, result)))
+                              attachOperands, attachOperandTypes, result)))
     return failure();
 
   // detach(value-list)?
   if (failed(parseOperandList(parser, DataOp::getDetachKeyword(),
-                              detachOperands, operandsTypes, result)))
+                              detachOperands, detachOperandTypes, result)))
     return failure();
 
   // Data op region
   if (failed(parseRegions<ParallelOp>(parser, result)))
     return failure();
 
-  result.addAttribute(
-      ParallelOp::getOperandSegmentSizeAttr(),
-      builder.getI32VectorAttr({static_cast<int32_t>(presentOperands.size()),
-                                static_cast<int32_t>(copyOperands.size()),
-                                static_cast<int32_t>(copyinOperands.size()),
-                                static_cast<int32_t>(copyoutOperands.size()),
-                                static_cast<int32_t>(createOperands.size()),
-                                static_cast<int32_t>(noCreateOperands.size()),
-                                static_cast<int32_t>(deleteOperands.size()),
-                                static_cast<int32_t>(attachOperands.size()),
-                                static_cast<int32_t>(detachOperands.size())}));
+  result.addAttribute(ParallelOp::getOperandSegmentSizeAttr(),
+                      builder.getI32VectorAttr(
+                          {static_cast<int32_t>(presentOperands.size()),
+                           static_cast<int32_t>(copyOperands.size()),
+                           static_cast<int32_t>(copyinOperands.size()),
+                           static_cast<int32_t>(copyinReadonlyOperands.size()),
+                           static_cast<int32_t>(copyoutOperands.size()),
+                           static_cast<int32_t>(copyoutZeroOperands.size()),
+                           static_cast<int32_t>(createOperands.size()),
+                           static_cast<int32_t>(createZeroOperands.size()),
+                           static_cast<int32_t>(noCreateOperands.size()),
+                           static_cast<int32_t>(deleteOperands.size()),
+                           static_cast<int32_t>(attachOperands.size()),
+                           static_cast<int32_t>(detachOperands.size())}));
 
   // Additional attributes
   if (failed(parser.parseOptionalAttrDictWithKeyword(result.attributes)))
@@ -514,11 +543,23 @@ static void print(OpAsmPrinter &printer, DataOp &op) {
   // copyin(value-list)?
   printOperandList(op.copyinOperands(), DataOp::getCopyinKeyword(), printer);
 
+  // copyin_readonly(value-list)?
+  printOperandList(op.copyinReadonlyOperands(),
+                   DataOp::getCopyinReadonlyKeyword(), printer);
+
   // copyout(value-list)?
   printOperandList(op.copyoutOperands(), DataOp::getCopyoutKeyword(), printer);
 
+  // copyout(value-list)?
+  printOperandList(op.copyoutZeroOperands(), DataOp::getCopyoutZeroKeyword(),
+                   printer);
+
   // create(value-list)?
   printOperandList(op.createOperands(), DataOp::getCreateKeyword(), printer);
+
+  // create_zero(value-list)?
+  printOperandList(op.createZeroOperands(), DataOp::getCreateZeroKeyword(),
+                   printer);
 
   // no_create(value-list)?
   printOperandList(op.noCreateOperands(), DataOp::getNoCreateKeyword(),
@@ -545,10 +586,14 @@ static void print(OpAsmPrinter &printer, DataOp &op) {
 //===----------------------------------------------------------------------===//
 
 /// Parse acc.loop operation
-/// operation := `acc.loop` `gang`? `vector`? `worker`?
-///                         `private` `(` value-list `)`?
-///                         `reduction` `(` value-list `)`?
-///                         region attr-dict?
+/// operation := `acc.loop`
+///              (`gang` ( `(` (`num=` value)? (`,` `static=` value `)`)? )? )?
+///              (`vector` ( `(` value `)` )? )? (`worker` (`(` value `)`)? )?
+///              (`vector_length` `(` value `)`)?
+///              (`tile` `(` value-list `)`)?
+///              (`private` `(` value-list `)`)?
+///              (`reduction` `(` value-list `)`)?
+///              region attr-dict?
 static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &result) {
   Builder &builder = parser.getBuilder();
   unsigned executionMapping = OpenACCExecMapping::NONE;
@@ -558,7 +603,7 @@ static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &result) {
   bool hasWorkerNum = false, hasVectorLength = false, hasGangNum = false;
   bool hasGangStatic = false;
   OpAsmParser::OperandType workerNum, vectorLength, gangNum, gangStatic;
-  Type intType = builder.getI64Type();
+  Type gangNumType, gangStaticType, workerType, vectorLengthType;
 
   // gang?
   if (succeeded(parser.parseOptionalKeyword(LoopOp::getGangKeyword())))
@@ -568,9 +613,9 @@ static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &result) {
   if (succeeded(parser.parseOptionalLParen())) {
     if (succeeded(parser.parseOptionalKeyword(LoopOp::getGangNumKeyword()))) {
       hasGangNum = true;
-      parser.parseColon();
-      if (parser.parseOperand(gangNum) ||
-          parser.resolveOperand(gangNum, intType, result.operands)) {
+      parser.parseEqual();
+      if (parser.parseOperand(gangNum) || parser.parseColonType(gangNumType) ||
+          parser.resolveOperand(gangNum, gangNumType, result.operands)) {
         return failure();
       }
     }
@@ -578,9 +623,10 @@ static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &result) {
     if (succeeded(
             parser.parseOptionalKeyword(LoopOp::getGangStaticKeyword()))) {
       hasGangStatic = true;
-      parser.parseColon();
+      parser.parseEqual();
       if (parser.parseOperand(gangStatic) ||
-          parser.resolveOperand(gangStatic, intType, result.operands)) {
+          parser.parseColonType(gangStaticType) ||
+          parser.resolveOperand(gangStatic, gangStaticType, result.operands)) {
         return failure();
       }
     }
@@ -595,8 +641,8 @@ static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &result) {
   // optional worker operand
   if (succeeded(parser.parseOptionalLParen())) {
     hasWorkerNum = true;
-    if (parser.parseOperand(workerNum) ||
-        parser.resolveOperand(workerNum, intType, result.operands) ||
+    if (parser.parseOperand(workerNum) || parser.parseColonType(workerType) ||
+        parser.resolveOperand(workerNum, workerType, result.operands) ||
         parser.parseRParen()) {
       return failure();
     }
@@ -610,7 +656,9 @@ static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &result) {
   if (succeeded(parser.parseOptionalLParen())) {
     hasVectorLength = true;
     if (parser.parseOperand(vectorLength) ||
-        parser.resolveOperand(vectorLength, intType, result.operands) ||
+        parser.parseColonType(vectorLengthType) ||
+        parser.resolveOperand(vectorLength, vectorLengthType,
+                              result.operands) ||
         parser.parseRParen()) {
       return failure();
     }
@@ -671,12 +719,14 @@ static void print(OpAsmPrinter &printer, LoopOp &op) {
     if (gangNum || gangStatic) {
       printer << "(";
       if (gangNum) {
-        printer << LoopOp::getGangNumKeyword() << ": " << gangNum;
+        printer << LoopOp::getGangNumKeyword() << "=" << gangNum << ": "
+                << gangNum.getType();
         if (gangStatic)
           printer << ", ";
       }
       if (gangStatic)
-        printer << LoopOp::getGangStaticKeyword() << ": " << gangStatic;
+        printer << LoopOp::getGangStaticKeyword() << "=" << gangStatic << ": "
+                << gangStatic.getType();
       printer << ")";
     }
   }
@@ -686,7 +736,7 @@ static void print(OpAsmPrinter &printer, LoopOp &op) {
 
     // Print optional worker operand if present
     if (Value workerNum = op.workerNum())
-      printer << "(" << workerNum << ")";
+      printer << "(" << workerNum << ": " << workerNum.getType() << ")";
   }
 
   if (execMapping & OpenACCExecMapping::VECTOR) {
@@ -694,7 +744,7 @@ static void print(OpAsmPrinter &printer, LoopOp &op) {
 
     // Print optional vector operand if present
     if (Value vectorLength = op.vectorLength())
-      printer << "(" << vectorLength << ")";
+      printer << "(" << vectorLength << ": " << vectorLength.getType() << ")";
   }
 
   // tile()?
