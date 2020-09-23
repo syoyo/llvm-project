@@ -9314,6 +9314,24 @@ bool ScalarEvolution::isKnownPredicateViaNoOverflow(ICmpInst::Predicate Pred,
     if (MatchBinaryAddToConst(LHS, RHS, C, SCEV::FlagNSW) && C.isNegative())
       return true;
     break;
+
+  case ICmpInst::ICMP_UGE:
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
+  case ICmpInst::ICMP_ULE:
+    // X u<= (X + C)<nuw> for any C
+    if (MatchBinaryAddToConst(RHS, LHS, C, SCEV::FlagNUW))
+      return true;
+    break;
+
+  case ICmpInst::ICMP_UGT:
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
+  case ICmpInst::ICMP_ULT:
+    // X u< (X + C)<nuw> if C != 0
+    if (MatchBinaryAddToConst(RHS, LHS, C, SCEV::FlagNUW) && !C.isNullValue())
+      return true;
+    break;
   }
 
   return false;
@@ -9740,7 +9758,22 @@ bool ScalarEvolution::isImpliedCond(ICmpInst::Predicate Pred, const SCEV *LHS,
 
           if (isImpliedCondOperands(Pred, LHS, RHS, V, getConstant(Min)))
             return true;
+          break;
+
+        // `LHS < RHS` and `LHS <= RHS` are handled in the same way as `RHS > LHS` and `RHS >= LHS` respectively.
+        case ICmpInst::ICMP_SLE:
+        case ICmpInst::ICMP_ULE:
+          if (isImpliedCondOperands(CmpInst::getSwappedPredicate(Pred), RHS,
+                                    LHS, V, getConstant(SharperMin)))
+            return true;
           LLVM_FALLTHROUGH;
+
+        case ICmpInst::ICMP_SLT:
+        case ICmpInst::ICMP_ULT:
+          if (isImpliedCondOperands(CmpInst::getSwappedPredicate(Pred), RHS,
+                                    LHS, V, getConstant(Min)))
+            return true;
+          break;
 
         default:
           // No change

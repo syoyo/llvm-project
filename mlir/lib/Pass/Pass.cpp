@@ -359,19 +359,20 @@ LogicalResult OpToOpPassAdaptor::run(Pass *pass, Operation *op,
 
   // Initialize the pass state with a callback for the pass to dynamically
   // execute a pipeline on the currently visited operation.
-  pass->passState.emplace(
-      op, am, [&](OpPassManager &pipeline, Operation *root) {
+  auto dynamic_pipeline_callback =
+      [op, &am](OpPassManager &pipeline, Operation *root) {
         if (!op->isAncestor(root)) {
           root->emitOpError()
               << "Trying to schedule a dynamic pipeline on an "
                  "operation that isn't "
-                 "nested under the current operation the pass is process";
+                 "nested under the current operation the pass is processing";
           return failure();
         }
         AnalysisManager nestedAm = am.nest(root);
         return OpToOpPassAdaptor::runPipeline(pipeline.getPasses(), root,
                                               nestedAm);
-      });
+      };
+  pass->passState.emplace(op, am, dynamic_pipeline_callback);
   // Instrument before the pass has run.
   PassInstrumentor *pi = am.getPassInstrumentor();
   if (pi)
