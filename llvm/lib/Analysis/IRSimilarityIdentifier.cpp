@@ -163,3 +163,245 @@ unsigned IRInstructionMapper::mapToIllegalUnsigned(
 
   return INumber;
 }
+
+IRSimilarityCandidate::IRSimilarityCandidate(unsigned StartIdx, unsigned Len,
+                                             IRInstructionData *FirstInstIt,
+                                             IRInstructionData *LastInstIt)
+    : StartIdx(StartIdx), Len(Len) {
+
+  assert(FirstInstIt != nullptr && "Instruction is nullptr!");
+  assert(LastInstIt != nullptr && "Instruction is nullptr!");
+  assert(StartIdx + Len > StartIdx &&
+         "Overflow for IRSimilarityCandidate range?");
+  assert(Len - 1 ==
+             std::distance(iterator(FirstInstIt), iterator(LastInstIt)) &&
+         "Length of the first and last IRInstructionData do not match the "
+         "given length");
+
+  // We iterate over the given instructions, and map each unique value
+  // to a unique number in the IRSimilarityCandidate ValueToNumber and
+  // NumberToValue maps.  A constant get its own value globally, the individual
+  // uses of the constants are not considered to be unique.
+  //
+  // IR:                    Mapping Added:
+  // %add1 = add i32 %a, c1    %add1 -> 3, %a -> 1, c1 -> 2
+  // %add2 = add i32 %a, %1    %add2 -> 4
+  // %add3 = add i32 c2, c1    %add3 -> 6, c2 -> 5
+  //
+  // when replace with global values, starting from 1, would be
+  //
+  // 3 = add i32 1, 2
+  // 4 = add i32 1, 3
+  // 6 = add i32 5, 2
+  unsigned LocalValNumber = 1;
+  IRInstructionDataList::iterator ID = iterator(*FirstInstIt);
+  for (unsigned Loc = StartIdx; Loc < StartIdx + Len; Loc++, ID++) {
+    // Map the operand values to an unsigned integer if it does not already
+    // have an unsigned integer assigned to it.
+    for (Value *Arg : ID->OperVals)
+      if (ValueToNumber.find(Arg) == ValueToNumber.end()) {
+        ValueToNumber.try_emplace(Arg, LocalValNumber);
+        NumberToValue.try_emplace(LocalValNumber, Arg);
+        LocalValNumber++;
+      }
+
+    // Mapping the instructions to an unsigned integer if it is not already
+    // exist in the mapping.
+    if (ValueToNumber.find(ID->Inst) == ValueToNumber.end()) {
+      ValueToNumber.try_emplace(ID->Inst, LocalValNumber);
+      NumberToValue.try_emplace(LocalValNumber, ID->Inst);
+      LocalValNumber++;
+    }
+  }
+
+  // Setting the first and last instruction data pointers for the candidate.  If
+  // we got through the entire for loop without hitting an assert, we know
+  // that both of these instructions are not nullptrs.
+  FirstInst = FirstInstIt;
+  LastInst = LastInstIt;
+}
+
+bool IRSimilarityCandidate::isSimilar(const IRSimilarityCandidate &A,
+                                      const IRSimilarityCandidate &B) {
+  if (A.getLength() != B.getLength())
+    return false;
+
+  auto InstrDataForBoth =
+      zip(make_range(A.begin(), A.end()), make_range(B.begin(), B.end()));
+
+  return all_of(InstrDataForBoth,
+                [](std::tuple<IRInstructionData &, IRInstructionData &> R) {
+                  IRInstructionData &A = std::get<0>(R);
+                  IRInstructionData &B = std::get<1>(R);
+                  if (!A.Legal || !B.Legal)
+                    return false;
+                  return isClose(A, B);
+                });
+}
+
+/// Determine if operand number \p TargetArgVal is in the current mapping set
+/// for operand number \p SourceArgVal.
+///
+/// \param [in, out] CurrentSrcTgtNumberMapping current mapping of global
+/// value numbers from source IRSimilarityCandidate to target
+/// IRSimilarityCandidate.
+/// \param [in] SourceArgVal The global value number for an operand in the
+/// in the original candidate.
+/// \param [in] TargetArgVal The global value number for the corresponding
+/// operand in the other candidate.
+/// \returns True if there exists a mapping and false if not.
+bool checkNumberingAndReplace(
+    DenseMap<unsigned, DenseSet<unsigned>> &CurrentSrcTgtNumberMapping,
+    unsigned SourceArgVal, unsigned TargetArgVal) {
+  // We are given two unsigned integers representing the global values of
+  // the operands in different IRSimilarityCandidates and a current mapping
+  // between the two.
+  //
+  // Source Operand GVN: 1
+  // Target Operand GVN: 2
+  // CurrentMapping: {1: {1, 2}}
+  //
+  // Since we have mapping, and the target operand is contained in the set, we
+  // update it to:
+  // CurrentMapping: {1: {2}}
+  // and can return true. But, if the mapping was
+  // CurrentMapping: {1: {3}}
+  // we would return false.
+
+  bool WasInserted;
+  DenseMap<unsigned, DenseSet<unsigned>>::iterator Val;
+
+  std::tie(Val, WasInserted) = CurrentSrcTgtNumberMapping.insert(
+      std::make_pair(SourceArgVal, DenseSet<unsigned>({TargetArgVal})));
+
+  // If we created a new mapping, then we are done.
+  if (WasInserted)
+    return true;
+
+  // If there is more than one option in the mapping set, and the target value
+  // is included in the mapping set replace that set with one that only includes
+  // the target value, as it is the only valid mapping via the non commutative
+  // instruction.
+
+  DenseSet<unsigned> &TargetSet = Val->second;
+  if (TargetSet.size() > 1 && TargetSet.find(TargetArgVal) != TargetSet.end()) {
+    TargetSet.clear();
+    TargetSet.insert(TargetArgVal);
+    return true;
+  }
+
+  // Return true if we can find the value in the set.
+  return TargetSet.find(TargetArgVal) != TargetSet.end();
+}
+
+bool IRSimilarityCandidate::compareOperandMapping(OperandMapping A,
+                                                  OperandMapping B) {
+  // Iterators to keep track of where we are in the operands for each
+  // Instruction.
+  ArrayRef<Value *>::iterator VItA = A.OperVals.begin();
+  ArrayRef<Value *>::iterator VItB = B.OperVals.begin();
+  unsigned OperandLength = A.OperVals.size();
+
+  // For each operand, get the value numbering and ensure it is consistent.
+  for (unsigned Idx = 0; Idx < OperandLength; Idx++, VItA++, VItB++) {
+    unsigned OperValA = A.IRSC.ValueToNumber.find(*VItA)->second;
+    unsigned OperValB = B.IRSC.ValueToNumber.find(*VItB)->second;
+
+    // Attempt to add a set with only the target value.  If there is no mapping
+    // we can create it here.
+    //
+    // For an instruction like a subtraction:
+    // IRSimilarityCandidateA:  IRSimilarityCandidateB:
+    // %resultA = sub %a, %b    %resultB = sub %d, %e
+    //
+    // We map %a -> %d and %b -> %e.
+    //
+    // And check to see whether their mapping is consistent in
+    // checkNumberingAndReplace.
+
+    if (!checkNumberingAndReplace(A.ValueNumberMapping, OperValA, OperValB))
+      return false;
+
+    if (!checkNumberingAndReplace(B.ValueNumberMapping, OperValB, OperValA))
+      return false;
+  }
+  return true;
+}
+
+bool IRSimilarityCandidate::compareStructure(const IRSimilarityCandidate &A,
+                                             const IRSimilarityCandidate &B) {
+  if (A.getLength() != B.getLength())
+    return false;
+
+  if (A.ValueToNumber.size() != B.ValueToNumber.size())
+    return false;
+
+  iterator ItA = A.begin();
+  iterator ItB = B.begin();
+
+  // These sets create a create a mapping between the values in one candidate
+  // to values in the other candidate.  If we create a set with one element,
+  // and that same element maps to the original element in the candidate
+  // we have a good mapping.
+  DenseMap<unsigned, DenseSet<unsigned>> ValueNumberMappingA;
+  DenseMap<unsigned, DenseSet<unsigned>> ValueNumberMappingB;
+  DenseMap<unsigned, DenseSet<unsigned>>::iterator ValueMappingIt;
+
+  bool WasInserted;
+
+  // Iterate over the instructions contained in each candidate
+  unsigned SectionLength = A.getStartIdx() + A.getLength();
+  for (unsigned Loc = A.getStartIdx(); Loc < SectionLength;
+       ItA++, ItB++, Loc++) {
+    // Make sure the instructions are similar to one another.
+    if (!isClose(*ItA, *ItB))
+      return false;
+
+    Instruction *IA = ItA->Inst;
+    Instruction *IB = ItB->Inst;
+
+    if (!ItA->Legal || !ItB->Legal)
+      return false;
+
+    // Get the operand sets for the instructions.
+    ArrayRef<Value *> OperValsA = ItA->OperVals;
+    ArrayRef<Value *> OperValsB = ItB->OperVals;
+
+    unsigned InstValA = A.ValueToNumber.find(IA)->second;
+    unsigned InstValB = B.ValueToNumber.find(IB)->second;
+
+    // Ensure that the mappings for the instructions exists.
+    std::tie(ValueMappingIt, WasInserted) = ValueNumberMappingA.insert(
+        std::make_pair(InstValA, DenseSet<unsigned>({InstValB})));
+    if (!WasInserted && ValueMappingIt->second.find(InstValB) ==
+                            ValueMappingIt->second.end())
+      return false;
+
+    std::tie(ValueMappingIt, WasInserted) = ValueNumberMappingB.insert(
+        std::make_pair(InstValB, DenseSet<unsigned>({InstValA})));
+    if (!WasInserted && ValueMappingIt->second.find(InstValA) ==
+                            ValueMappingIt->second.end())
+      return false;
+
+    // TODO: Handle commutative instructions by mapping one operand to many
+    // operands instead only mapping a single operand to a single operand.
+    if (!compareOperandMapping({A, OperValsA, ValueNumberMappingA},
+                               {B, OperValsB, ValueNumberMappingB}))
+      return false;
+  }
+
+  return true;
+}
+
+bool IRSimilarityCandidate::overlap(const IRSimilarityCandidate &A,
+                                    const IRSimilarityCandidate &B) {
+  auto DoesOverlap = [](const IRSimilarityCandidate &X,
+                        const IRSimilarityCandidate &Y) {
+    // Check:
+    // XXXXXX        X starts before Y ends
+    //      YYYYYYY  Y starts after X starts
+    return X.StartIdx <= Y.getEndIdx() && Y.StartIdx >= X.StartIdx;
+  };
+
+  return DoesOverlap(A, B) || DoesOverlap(B, A);
+}
