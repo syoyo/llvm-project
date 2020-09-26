@@ -73,6 +73,11 @@ using namespace llvm;
 #define DEBUG_TYPE "arm-low-overhead-loops"
 #define ARM_LOW_OVERHEAD_LOOPS_NAME "ARM Low Overhead Loops pass"
 
+static cl::opt<bool>
+DisableTailPredication("arm-loloops-disable-tailpred", cl::Hidden,
+    cl::desc("Disable tail-predication in the ARM LowOverheadLoop pass"),
+    cl::init(false));
+
 static bool isVectorPredicated(MachineInstr *MI) {
   int PIdx = llvm::findFirstVPTPredOperandIdx(*MI);
   return PIdx != -1 && MI->getOperand(PIdx + 1).getReg() == ARM::VPR;
@@ -251,12 +256,54 @@ namespace {
       return isPredicatedOnVCTP(Insts.front(), Exclusive);
     }
 
-    static bool isValid() {
+    // If this block begins with a VPT, we can check whether it's using
+    // at least one predicated input(s), as well as possible loop invariant
+    // which would result in it being implicitly predicated.
+    static bool hasImplicitlyValidVPT(VPTState &Block,
+                                      ReachingDefAnalysis &RDA) {
+      SmallVectorImpl<MachineInstr *> &Insts = Block.getInsts();
+      MachineInstr *VPT = Insts.front();
+      assert(isVPTOpcode(VPT->getOpcode()) &&
+             "Expected VPT block to begin with VPT/VPST");
+
+      if (VPT->getOpcode() == ARM::MVE_VPST)
+        return false;
+
+      auto IsOperandPredicated = [&](MachineInstr *MI, unsigned Idx) {
+        MachineInstr *Op = RDA.getMIOperand(MI, MI->getOperand(Idx));
+        return Op && PredicatedInsts.count(Op) && isPredicatedOnVCTP(Op);
+      };
+
+      auto IsOperandInvariant = [&](MachineInstr *MI, unsigned Idx) {
+        MachineOperand &MO = MI->getOperand(Idx);
+        if (!MO.isReg() || !MO.getReg())
+          return true;
+
+        SmallPtrSet<MachineInstr *, 2> Defs;
+        RDA.getGlobalReachingDefs(MI, MO.getReg(), Defs);
+        if (Defs.empty())
+          return true;
+
+        for (auto *Def : Defs)
+          if (Def->getParent() == VPT->getParent())
+            return false;
+        return true;
+      };
+
+      // Check that at least one of the operands is directly predicated on a
+      // vctp and allow an invariant value too.
+      return (IsOperandPredicated(VPT, 1) || IsOperandPredicated(VPT, 2)) &&
+             (IsOperandPredicated(VPT, 1) || IsOperandInvariant(VPT, 1)) &&
+             (IsOperandPredicated(VPT, 2) || IsOperandInvariant(VPT, 2));
+    }
+
+    static bool isValid(ReachingDefAnalysis &RDA) {
       // All predication within the loop should be based on vctp. If the block
       // isn't predicated on entry, check whether the vctp is within the block
       // and that all other instructions are then predicated on it.
       for (auto &Block : Blocks) {
-        if (isEntryPredicatedOnVCTP(Block))
+        if (isEntryPredicatedOnVCTP(Block, false) ||
+            hasImplicitlyValidVPT(Block, RDA))
           continue;
 
         SmallVectorImpl<MachineInstr *> &Insts = Block.getInsts();
@@ -507,7 +554,12 @@ MachineInstr *LowOverheadLoop::isSafeToDefineLR() {
 bool LowOverheadLoop::ValidateTailPredicate(MachineInstr *StartInsertPt) {
   assert(!VCTPs.empty() && "VCTP instruction expected but is not set");
 
-  if (!VPTState::isValid())
+  if (DisableTailPredication) {
+    LLVM_DEBUG(dbgs() << "ARM Loops: tail-predication is disabled\n");
+    return false;
+  }
+
+  if (!VPTState::isValid(RDA))
     return false;
 
   if (!ValidateLiveOuts()) {
@@ -567,6 +619,28 @@ bool LowOverheadLoop::ValidateTailPredicate(MachineInstr *StartInsertPt) {
       }
     }
   }
+
+  // Could inserting the [W|D]LSTP cause some unintended affects? In a perfect
+  // world the [w|d]lstp instruction would be last instruction in the preheader
+  // and so it would only affect instructions within the loop body. But due to
+  // scheduling, and/or the logic in this pass (above), the insertion point can
+  // be moved earlier. So if the Loop Start isn't the last instruction in the
+  // preheader, and if the initial element count is smaller than the vector
+  // width, the Loop Start instruction will immediately generate one or more
+  // false lane mask which can, incorrectly, affect the proceeding MVE
+  // instructions in the preheader.
+  auto cannotInsertWDLSTPBetween = [](MachineInstr *Begin,
+                                      MachineInstr *End) {
+    auto I = MachineBasicBlock::iterator(Begin);
+    auto E = MachineBasicBlock::iterator(End);
+    for (; I != E; ++I)
+      if (shouldInspect(*I))
+        return true;
+    return false;
+  };
+
+  if (cannotInsertWDLSTPBetween(StartInsertPt, &InsertBB->back()))
+    return false;
 
   // Especially in the case of while loops, InsertBB may not be the
   // preheader, so we need to check that the register isn't redefined
@@ -1387,22 +1461,12 @@ void ARMLowOverheadLoops::ConvertVPTBlocks(LowOverheadLoop &LoLoop) {
           ? Divergent
           : nullptr;
 
-        unsigned Size = 0;
-        auto E = MachineBasicBlock::reverse_iterator(Divergent);
-        auto I = MachineBasicBlock::reverse_iterator(Insts.back());
-        MachineInstr *InsertAt = nullptr;
-        while (I != E) {
-          InsertAt = &*I;
-          ++Size;
-          ++I;
-        }
-
         MachineInstrBuilder MIB;
         if (VCMP) {
           // Combine the VPST and VCMP into a VPT
-          MIB =
-              BuildMI(*InsertAt->getParent(), InsertAt, InsertAt->getDebugLoc(),
-                      TII->get(VCMPOpcodeToVPT(VCMP->getOpcode())));
+          MIB = BuildMI(*Divergent->getParent(), Divergent,
+                        Divergent->getDebugLoc(),
+                        TII->get(VCMPOpcodeToVPT(VCMP->getOpcode())));
           MIB.addImm(ARMVCC::Then);
           // Register one
           MIB.add(VCMP->getOperand(1));
@@ -1416,8 +1480,8 @@ void ARMLowOverheadLoops::ConvertVPTBlocks(LowOverheadLoop &LoLoop) {
         } else {
           // Create a VPST (with a null mask for now, we'll recompute it later)
           // or a VPT in case there was a VCMP right before it
-          MIB = BuildMI(*InsertAt->getParent(), InsertAt,
-                        InsertAt->getDebugLoc(), TII->get(ARM::MVE_VPST));
+          MIB = BuildMI(*Divergent->getParent(), Divergent,
+                        Divergent->getDebugLoc(), TII->get(ARM::MVE_VPST));
           MIB.addImm(0);
           LLVM_DEBUG(dbgs() << "ARM Loops: Created VPST: " << *MIB);
         }
