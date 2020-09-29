@@ -67,7 +67,7 @@ using namespace llvm;
 
 cl::opt<TailPredication::Mode> EnableTailPredication(
    "tail-predication", cl::desc("MVE tail-predication pass options"),
-   cl::init(TailPredication::Disabled),
+   cl::init(TailPredication::Enabled),
    cl::values(clEnumValN(TailPredication::Disabled, "disabled",
                          "Don't tail-predicate loops"),
               clEnumValN(TailPredication::EnabledNoReductions,
@@ -435,6 +435,8 @@ bool MVETailPredication::IsSafeActiveMask(IntrinsicInst *ActiveLaneMask,
     // Ceil = ElementCount + (VW-1) / VW
     auto *Ceil = SE->getUDivExpr(ECPlusVWMinus1, VW);
 
+    // Prevent unused variable warnings with TC
+    (void)TC;
     LLVM_DEBUG(
       dbgs() << "ARM TP: Analysing overflow behaviour for:\n";
       dbgs() << "ARM TP: - TripCount = "; TC->dump();
