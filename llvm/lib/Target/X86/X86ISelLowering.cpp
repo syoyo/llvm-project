@@ -5022,13 +5022,47 @@ bool X86TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
                                            const CallInst &I,
                                            MachineFunction &MF,
                                            unsigned Intrinsic) const {
-
-  const IntrinsicData* IntrData = getIntrinsicWithChain(Intrinsic);
-  if (!IntrData)
-    return false;
-
   Info.flags = MachineMemOperand::MONone;
   Info.offset = 0;
+
+  const IntrinsicData* IntrData = getIntrinsicWithChain(Intrinsic);
+  if (!IntrData) {
+    switch (Intrinsic) {
+    case Intrinsic::x86_aesenc128kl:
+    case Intrinsic::x86_aesdec128kl:
+      Info.opc = ISD::INTRINSIC_W_CHAIN;
+      Info.ptrVal = I.getArgOperand(1);
+      Info.memVT = EVT::getIntegerVT(I.getType()->getContext(), 48);
+      Info.align = Align(1);
+      Info.flags |= MachineMemOperand::MOLoad;
+      return true;
+    case Intrinsic::x86_aesenc256kl:
+    case Intrinsic::x86_aesdec256kl:
+      Info.opc = ISD::INTRINSIC_W_CHAIN;
+      Info.ptrVal = I.getArgOperand(1);
+      Info.memVT = EVT::getIntegerVT(I.getType()->getContext(), 64);
+      Info.align = Align(1);
+      Info.flags |= MachineMemOperand::MOLoad;
+      return true;
+    case Intrinsic::x86_aesencwide128kl:
+    case Intrinsic::x86_aesdecwide128kl:
+      Info.opc = ISD::INTRINSIC_W_CHAIN;
+      Info.ptrVal = I.getArgOperand(0);
+      Info.memVT = EVT::getIntegerVT(I.getType()->getContext(), 48);
+      Info.align = Align(1);
+      Info.flags |= MachineMemOperand::MOLoad;
+      return true;
+    case Intrinsic::x86_aesencwide256kl:
+    case Intrinsic::x86_aesdecwide256kl:
+      Info.opc = ISD::INTRINSIC_W_CHAIN;
+      Info.ptrVal = I.getArgOperand(0);
+      Info.memVT = EVT::getIntegerVT(I.getType()->getContext(), 64);
+      Info.align = Align(1);
+      Info.flags |= MachineMemOperand::MOLoad;
+      return true;
+    }
+    return false;
+  }
 
   switch (IntrData->Type) {
   case TRUNCATE_TO_MEM_VI8:
@@ -25952,198 +25986,86 @@ static SDValue LowerINTRINSIC_W_CHAIN(SDValue Op, const X86Subtarget &Subtarget,
       return DAG.getNode(ISD::MERGE_VALUES, dl, Op->getVTList(), SetCC,
                          Operation.getValue(1));
     }
-    case Intrinsic::x86_mwaitx: {
-      // If the current function needs the base pointer, RBX,
-      // we shouldn't use mwaitx directly.
-      // Indeed the lowering of that instruction will clobber
-      // that register and since RBX will be a reserved register
-      // the register allocator will not make sure its value will
-      // be properly saved and restored around this live-range.
-      SDLoc dl(Op);
-      unsigned Opcode = X86ISD::MWAITX_DAG;
-      SDValue Chain = DAG.getNode(Opcode, dl, MVT::Other,
-                                  {Op->getOperand(0), Op->getOperand(2),
-                                   Op->getOperand(3), Op->getOperand(4)});
-      return Chain;
-    }
-    case Intrinsic::x86_encodekey128:
-    case Intrinsic::x86_encodekey256: {
-      SDLoc DL(Op);
-      SDVTList VTs = DAG.getVTList(MVT::i32, MVT::Other, MVT::Glue);
-      SDValue Chain = Op.getOperand(0);
-      bool IsEK256 = false;
-      Chain = DAG.getCopyToReg(Chain, DL, X86::XMM0, Op->getOperand(3),
-                               SDValue());
-
-      unsigned Opcode;
-
-      switch (IntNo) {
-      default: llvm_unreachable("Impossible intrinsic");
-      case Intrinsic::x86_encodekey128:
-        Opcode = X86::ENCODEKEY128;
-        break;
-      case Intrinsic::x86_encodekey256:
-        Opcode = X86::ENCODEKEY256;
-        Chain = DAG.getCopyToReg(Chain, DL, X86::XMM1, Op->getOperand(4),
-                                 Chain.getValue(1));
-        IsEK256 = true;
-        break;
-      }
-
-      SDNode *Res = DAG.getMachineNode(Opcode, DL, VTs,
-                                       {Op.getOperand(2), Chain,
-                                        Chain.getValue(1)});
-
-      Chain = SDValue(Res, 1);
-
-      SDValue XMM0 = DAG.getCopyFromReg(Chain, DL, X86::XMM0, MVT::v16i8,
-                                        SDValue(Res, 2));
-      SDValue XMM1 = DAG.getCopyFromReg(XMM0.getValue(1), DL, X86::XMM1,
-                                        MVT::v16i8, XMM0.getValue(2));
-      SDValue XMM2 = DAG.getCopyFromReg(XMM1.getValue(1), DL, X86::XMM2,
-                                        MVT::v16i8, XMM1.getValue(2));
-      SDValue XMM3, XMM4;
-      if (IsEK256) {
-        XMM3 = DAG.getCopyFromReg(XMM2.getValue(1), DL, X86::XMM3,
-                                  MVT::v16i8, XMM2.getValue(2));
-        XMM4 = DAG.getCopyFromReg(XMM3.getValue(1), DL, X86::XMM4,
-                                  MVT::v16i8, XMM3.getValue(2));
-      } else {
-        XMM4 = DAG.getCopyFromReg(XMM2.getValue(1), DL, X86::XMM4,
-                                  MVT::v16i8, XMM2.getValue(2));
-      }
-      SDValue XMM5 = DAG.getCopyFromReg(XMM4.getValue(1), DL, X86::XMM5,
-                                        MVT::v16i8, XMM4.getValue(2));
-      SDValue XMM6 = DAG.getCopyFromReg(XMM5.getValue(1), DL, X86::XMM6,
-                                        MVT::v16i8, XMM5.getValue(2));
-
-      if (IsEK256) {
-        return DAG.getNode(ISD::MERGE_VALUES, DL, Op->getVTList(),
-                           {SDValue(Res, 0),
-                            XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, Chain});
-      } else {
-        return DAG.getNode(ISD::MERGE_VALUES, DL, Op->getVTList(),
-                           {SDValue(Res, 0),
-                            XMM0, XMM1, XMM2, XMM4, XMM5, XMM6, Chain});
-      }
-    }
     case Intrinsic::x86_aesenc128kl:
     case Intrinsic::x86_aesdec128kl:
     case Intrinsic::x86_aesenc256kl:
     case Intrinsic::x86_aesdec256kl: {
       SDLoc DL(Op);
-      SDVTList VTs = DAG.getVTList(MVT::v16i8, MVT::Other, MVT::Glue);
+      SDVTList VTs = DAG.getVTList(MVT::v2i64, MVT::i32, MVT::Other);
       SDValue Chain = Op.getOperand(0);
       unsigned Opcode;
 
       switch (IntNo) {
       default: llvm_unreachable("Impossible intrinsic");
       case Intrinsic::x86_aesenc128kl:
-        Opcode = X86::AESENC128KL;
+        Opcode = X86ISD::AESENC128KL;
         break;
       case Intrinsic::x86_aesdec128kl:
-        Opcode = X86::AESDEC128KL;
+        Opcode = X86ISD::AESDEC128KL;
         break;
       case Intrinsic::x86_aesenc256kl:
-        Opcode = X86::AESENC256KL;
+        Opcode = X86ISD::AESENC256KL;
         break;
       case Intrinsic::x86_aesdec256kl:
-        Opcode = X86::AESDEC256KL;
+        Opcode = X86ISD::AESDEC256KL;
         break;
       }
 
-      SDValue XMM = Op.getOperand(2);
-      SDValue Base = Op.getOperand(3);
-      SDValue Index = DAG.getRegister(0, MVT::i32);
-      SDValue Scale = DAG.getTargetConstant(1, DL, MVT::i8);
-      SDValue Disp = DAG.getTargetConstant(0, DL, MVT::i32);
-      SDValue Segment = DAG.getRegister(0, MVT::i32);
-
-      SDNode *Res = DAG.getMachineNode(Opcode, DL, VTs, {XMM, Base, Scale, Index,
-                                                         Disp, Segment, Chain});
-      Chain = SDValue(Res, 1);
-      SDValue EFLAGS = DAG.getCopyFromReg(Chain, DL, X86::EFLAGS, MVT::i32,
-                                          SDValue(Res, 2));
-      SDValue ZF = getSETCC(X86::COND_E, EFLAGS.getValue(0), DL, DAG);
+      MemIntrinsicSDNode *MemIntr = cast<MemIntrinsicSDNode>(Op);
+      MachineMemOperand *MMO = MemIntr->getMemOperand();
+      EVT MemVT = MemIntr->getMemoryVT();
+      SDValue Operation = DAG.getMemIntrinsicNode(
+          Opcode, DL, VTs, {Chain, Op.getOperand(2), Op.getOperand(3)}, MemVT,
+          MMO);
+      SDValue ZF = getSETCC(X86::COND_E, Operation.getValue(1), DL, DAG);
 
       return DAG.getNode(ISD::MERGE_VALUES, DL, Op->getVTList(),
-                         {ZF, SDValue(Res, 0), EFLAGS.getValue(1)});
+                         {ZF, Operation.getValue(0), Operation.getValue(2)});
     }
     case Intrinsic::x86_aesencwide128kl:
     case Intrinsic::x86_aesdecwide128kl:
     case Intrinsic::x86_aesencwide256kl:
     case Intrinsic::x86_aesdecwide256kl: {
       SDLoc DL(Op);
-      SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
+      SDVTList VTs = DAG.getVTList(
+          {MVT::i32, MVT::v2i64, MVT::v2i64, MVT::v2i64, MVT::v2i64, MVT::v2i64,
+           MVT::v2i64, MVT::v2i64, MVT::v2i64, MVT::Other});
       SDValue Chain = Op.getOperand(0);
       unsigned Opcode;
 
       switch (IntNo) {
       default: llvm_unreachable("Impossible intrinsic");
       case Intrinsic::x86_aesencwide128kl:
-        Opcode = X86::AESENCWIDE128KL;
+        Opcode = X86ISD::AESENCWIDE128KL;
         break;
       case Intrinsic::x86_aesdecwide128kl:
-        Opcode = X86::AESDECWIDE128KL;
+        Opcode = X86ISD::AESDECWIDE128KL;
         break;
       case Intrinsic::x86_aesencwide256kl:
-        Opcode = X86::AESENCWIDE256KL;
+        Opcode = X86ISD::AESENCWIDE256KL;
         break;
       case Intrinsic::x86_aesdecwide256kl:
-        Opcode = X86::AESDECWIDE256KL;
+        Opcode = X86ISD::AESDECWIDE256KL;
         break;
       }
 
-      SDValue Base = Op.getOperand(2);
-      SDValue Index = DAG.getRegister(0, MVT::i32);
-      SDValue Scale = DAG.getTargetConstant(1, DL, MVT::i8);
-      SDValue Disp = DAG.getTargetConstant(0, DL, MVT::i32);
-      SDValue Segment = DAG.getRegister(0, MVT::i32);
+      MemIntrinsicSDNode *MemIntr = cast<MemIntrinsicSDNode>(Op);
+      MachineMemOperand *MMO = MemIntr->getMemOperand();
+      EVT MemVT = MemIntr->getMemoryVT();
+      SDValue Operation = DAG.getMemIntrinsicNode(
+          Opcode, DL, VTs,
+          {Chain, Op.getOperand(2), Op.getOperand(3), Op.getOperand(4),
+           Op.getOperand(5), Op.getOperand(6), Op.getOperand(7),
+           Op.getOperand(8), Op.getOperand(9), Op.getOperand(10)},
+          MemVT, MMO);
+      SDValue ZF = getSETCC(X86::COND_E, Operation.getValue(0), DL, DAG);
 
-      Chain = DAG.getCopyToReg(Chain, DL, X86::XMM0, Op->getOperand(3),
-                               SDValue());
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM1,
-                               Op->getOperand(4), Chain.getValue(1));
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM2,
-                               Op->getOperand(5), Chain.getValue(1));
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM3,
-                               Op->getOperand(6), Chain.getValue(1));
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM4,
-                               Op->getOperand(7), Chain.getValue(1));
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM5,
-                               Op->getOperand(8), Chain.getValue(1));
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM6,
-                               Op->getOperand(9), Chain.getValue(1));
-      Chain = DAG.getCopyToReg(Chain.getValue(0), DL, X86::XMM7,
-                               Op->getOperand(10),Chain.getValue(1));
-
-      SDNode *Res = DAG.getMachineNode(Opcode, DL, VTs, {Base, Scale, Index,
-                                                         Disp, Segment, Chain,
-                                                         Chain.getValue(1)});
-
-      Chain = SDValue(Res, 0);
-      SDValue EFLAGS = DAG.getCopyFromReg(Chain, DL, X86::EFLAGS, MVT::i32,
-                                          SDValue(Res, 1));
-      SDValue ZF = getSETCC(X86::COND_E, EFLAGS.getValue(0), DL, DAG);
-      SDValue XMM0 = DAG.getCopyFromReg(EFLAGS.getValue(1), DL, X86::XMM0,
-                                        MVT::v16i8, EFLAGS.getValue(2));
-      SDValue XMM1 = DAG.getCopyFromReg(XMM0.getValue(1), DL, X86::XMM1,
-                                        MVT::v16i8, XMM0.getValue(2));
-      SDValue XMM2 = DAG.getCopyFromReg(XMM1.getValue(1), DL, X86::XMM2,
-                                        MVT::v16i8, XMM1.getValue(2));
-      SDValue XMM3 = DAG.getCopyFromReg(XMM2.getValue(1), DL, X86::XMM3,
-                                        MVT::v16i8, XMM2.getValue(2));
-      SDValue XMM4 = DAG.getCopyFromReg(XMM3.getValue(1), DL, X86::XMM4,
-                                        MVT::v16i8, XMM3.getValue(2));
-      SDValue XMM5 = DAG.getCopyFromReg(XMM4.getValue(1), DL, X86::XMM5,
-                                        MVT::v16i8, XMM4.getValue(2));
-      SDValue XMM6 = DAG.getCopyFromReg(XMM5.getValue(1), DL, X86::XMM6,
-                                        MVT::v16i8, XMM5.getValue(2));
-      SDValue XMM7 = DAG.getCopyFromReg(XMM6.getValue(1), DL, X86::XMM7,
-                                        MVT::v16i8, XMM6.getValue(2));
       return DAG.getNode(ISD::MERGE_VALUES, DL, Op->getVTList(),
-                         {ZF, XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
-                          XMM7.getValue(1)});
+                         {ZF, Operation.getValue(1), Operation.getValue(2),
+                          Operation.getValue(3), Operation.getValue(4),
+                          Operation.getValue(5), Operation.getValue(6),
+                          Operation.getValue(7), Operation.getValue(8),
+                          Operation.getValue(9)});
     }
     }
     return SDValue();
@@ -30893,7 +30815,6 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(LCMPXCHG16_DAG)
   NODE_NAME_CASE(LCMPXCHG8_SAVE_EBX_DAG)
   NODE_NAME_CASE(LCMPXCHG16_SAVE_RBX_DAG)
-  NODE_NAME_CASE(MWAITX_DAG)
   NODE_NAME_CASE(LADD)
   NODE_NAME_CASE(LSUB)
   NODE_NAME_CASE(LOR)
@@ -31167,6 +31088,14 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(ENQCMD)
   NODE_NAME_CASE(ENQCMDS)
   NODE_NAME_CASE(VP2INTERSECT)
+  NODE_NAME_CASE(AESENC128KL)
+  NODE_NAME_CASE(AESDEC128KL)
+  NODE_NAME_CASE(AESENC256KL)
+  NODE_NAME_CASE(AESDEC256KL)
+  NODE_NAME_CASE(AESENCWIDE128KL)
+  NODE_NAME_CASE(AESDECWIDE128KL)
+  NODE_NAME_CASE(AESENCWIDE256KL)
+  NODE_NAME_CASE(AESDECWIDE256KL)
   }
   return nullptr;
 #undef NODE_NAME_CASE
@@ -32394,7 +32323,7 @@ X86TargetLowering::EmitLoweredProbedAlloca(MachineInstr &MI,
 
   BuildMI(testMBB, DL, TII->get(X86::JCC_1))
       .addMBB(tailMBB)
-      .addImm(X86::COND_L);
+      .addImm(X86::COND_LE);
   testMBB->addSuccessor(blockMBB);
   testMBB->addSuccessor(tailMBB);
 
