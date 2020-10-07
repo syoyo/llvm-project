@@ -1212,7 +1212,11 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
     if (YcArg && JA.getKind() >= Action::PrecompileJobClass &&
         JA.getKind() <= Action::AssembleJobClass) {
       CmdArgs.push_back(Args.MakeArgString("-building-pch-with-obj"));
-      CmdArgs.push_back(Args.MakeArgString("-fpch-instantiate-templates"));
+      // -fpch-instantiate-templates is the default when creating
+      // precomp using /Yc
+      if (Args.hasFlag(options::OPT_fpch_instantiate_templates,
+                       options::OPT_fno_pch_instantiate_templates, true))
+        CmdArgs.push_back(Args.MakeArgString("-fpch-instantiate-templates"));
     }
     if (YcArg || YuArg) {
       StringRef ThroughHeader = YcArg ? YcArg->getValue() : YuArg->getValue();
@@ -5476,9 +5480,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Forward -cl options to -cc1
   RenderOpenCLOptions(Args, CmdArgs);
 
-  if (IsHIP && Args.hasFlag(options::OPT_fhip_new_launch_api,
-                            options::OPT_fno_hip_new_launch_api, true))
-    CmdArgs.push_back("-fhip-new-launch-api");
+  if (IsHIP) {
+    if (Args.hasFlag(options::OPT_fhip_new_launch_api,
+                     options::OPT_fno_hip_new_launch_api, true))
+      CmdArgs.push_back("-fhip-new-launch-api");
+    if (Args.hasFlag(options::OPT_fgpu_allow_device_init,
+                     options::OPT_fno_gpu_allow_device_init, false))
+      CmdArgs.push_back("-fgpu-allow-device-init");
+  }
 
   if (Arg *A = Args.getLastArg(options::OPT_fcf_protection_EQ)) {
     CmdArgs.push_back(

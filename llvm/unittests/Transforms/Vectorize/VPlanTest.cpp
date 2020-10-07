@@ -167,12 +167,36 @@ TEST(VPInstructionTest, replaceAllUsesWith) {
   EXPECT_EQ(0u, VPV2->getNumUsers());
   EXPECT_EQ(0u, VPV3->getNumUsers());
 
+  VPInstruction *I2 = new VPInstruction(0, {VPV1, VPV2});
+  EXPECT_EQ(3u, VPV1->getNumUsers());
+  VPV1->replaceAllUsesWith(VPV3);
+  EXPECT_EQ(3u, VPV3->getNumUsers());
+
   delete I1;
+  delete I2;
   delete VPV1;
   delete VPV2;
   delete VPV3;
 }
 
+TEST(VPInstructionTest, releaseOperandsAtDeletion) {
+  VPValue *VPV1 = new VPValue();
+  VPValue *VPV2 = new VPValue();
+  VPInstruction *I1 = new VPInstruction(0, {VPV1, VPV2});
+
+  EXPECT_EQ(1u, VPV1->getNumUsers());
+  EXPECT_EQ(I1, *VPV1->user_begin());
+  EXPECT_EQ(1u, VPV2->getNumUsers());
+  EXPECT_EQ(I1, *VPV2->user_begin());
+
+  delete I1;
+
+  EXPECT_EQ(0u, VPV1->getNumUsers());
+  EXPECT_EQ(0u, VPV2->getNumUsers());
+
+  delete VPV1;
+  delete VPV2;
+}
 TEST(VPBasicBlockTest, getPlan) {
   {
     VPBasicBlock *VPBB1 = new VPBasicBlock();
@@ -333,6 +357,16 @@ compound=true
   }
 }
 
+TEST(VPRecipeTest, CastVPInstructionToVPUser) {
+  VPValue Op1;
+  VPValue Op2;
+  VPInstruction Recipe(Instruction::Add, {&Op1, &Op2});
+  EXPECT_TRUE(isa<VPUser>(&Recipe));
+  VPRecipeBase *BaseR = &Recipe;
+  EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&Recipe, BaseR->toVPUser());
+}
+
 TEST(VPRecipeTest, CastVPWidenRecipeToVPUser) {
   LLVMContext C;
 
@@ -348,6 +382,7 @@ TEST(VPRecipeTest, CastVPWidenRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&WidenR));
   VPRecipeBase *WidenRBase = &WidenR;
   EXPECT_TRUE(isa<VPUser>(WidenRBase));
+  EXPECT_EQ(&WidenR, WidenRBase->toVPUser());
   delete AI;
 }
 
@@ -366,6 +401,7 @@ TEST(VPRecipeTest, CastVPWidenCallRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&Recipe, BaseR->toVPUser());
   delete Call;
 }
 
@@ -388,6 +424,7 @@ TEST(VPRecipeTest, CastVPWidenSelectRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&WidenSelectR));
   VPRecipeBase *BaseR = &WidenSelectR;
   EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&WidenSelectR, BaseR->toVPUser());
   delete SelectI;
 }
 
@@ -407,6 +444,7 @@ TEST(VPRecipeTest, CastVPWidenGEPRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&Recipe, BaseR->toVPUser());
   delete GEP;
 }
 
@@ -436,6 +474,7 @@ TEST(VPRecipeTest, CastVPInterleaveRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&Recipe, BaseR->toVPUser());
 }
 
 TEST(VPRecipeTest, CastVPReplicateRecipeToVPUser) {
@@ -462,6 +501,7 @@ TEST(VPRecipeTest, CastVPBranchOnMaskRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&Recipe, BaseR->toVPUser());
 }
 
 TEST(VPRecipeTest, CastVPWidenMemoryInstructionRecipeToVPUser) {
@@ -477,6 +517,7 @@ TEST(VPRecipeTest, CastVPWidenMemoryInstructionRecipeToVPUser) {
   EXPECT_TRUE(isa<VPUser>(&Recipe));
   VPRecipeBase *BaseR = &Recipe;
   EXPECT_TRUE(isa<VPUser>(BaseR));
+  EXPECT_EQ(&Recipe, BaseR->toVPUser());
   delete Load;
 }
 
