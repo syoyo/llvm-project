@@ -7987,14 +7987,20 @@ static Constant *BuildConstantFromSCEV(const SCEV *V) {
       return dyn_cast<Constant>(cast<SCEVUnknown>(V)->getValue());
     case scSignExtend: {
       const SCEVSignExtendExpr *SS = cast<SCEVSignExtendExpr>(V);
-      if (Constant *CastOp = BuildConstantFromSCEV(SS->getOperand()))
-        return ConstantExpr::getSExt(CastOp, SS->getType());
+      if (Constant *CastOp = BuildConstantFromSCEV(SS->getOperand())) {
+        if (!CastOp->getType()->isPointerTy())
+          return ConstantExpr::getSExt(CastOp, SS->getType());
+        return ConstantExpr::getPtrToInt(CastOp, SS->getType());
+      }
       break;
     }
     case scZeroExtend: {
       const SCEVZeroExtendExpr *SZ = cast<SCEVZeroExtendExpr>(V);
-      if (Constant *CastOp = BuildConstantFromSCEV(SZ->getOperand()))
-        return ConstantExpr::getZExt(CastOp, SZ->getType());
+      if (Constant *CastOp = BuildConstantFromSCEV(SZ->getOperand())) {
+        if (!CastOp->getType()->isPointerTy())
+          return ConstantExpr::getZExt(CastOp, SZ->getType());
+        return ConstantExpr::getPtrToInt(CastOp, SZ->getType());
+      }
       break;
     }
     case scTruncate: {
