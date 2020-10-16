@@ -1936,7 +1936,7 @@ def successor;
 // }
 // ```
 //
-// To define a custom builder, the parameter list (*including* the `Builder
+// To define a custom builder, the parameter list (*excluding* the `Builder
 // *builder, OperationState &state` part) and body should be passed in
 // as separate template arguments to this class. This is because we generate
 // op declaration and definition into separate files. If an empty string is
@@ -2350,6 +2350,8 @@ class Pat<dag pattern, dag result, list<dag> preds = [],
 class NativeCodeCall<string expr> {
   string expression = expr;
 }
+
+def ConstantLikeMatcher : NativeCodeCall<"success(matchPattern($0->getResult(0), m_Constant(&$1)))">;
 
 //===----------------------------------------------------------------------===//
 // Rewrite directives
