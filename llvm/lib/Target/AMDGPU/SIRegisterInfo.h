@@ -41,7 +41,7 @@ private:
   static std::array<std::vector<int16_t>, 16> RegSplitParts;
 
   // Table representing sub reg of given width and offset.
-  // First index is subreg size: 32, 64, 96, 128, 160, 192, 256, 512.
+  // First index is subreg size: 32, 64, 96, 128, 160, 192, 224, 256, 512.
   // Second index is 32 different dword offsets.
   static std::array<std::array<uint16_t, 32>, 9> SubRegFromChannelTable;
 
@@ -325,10 +325,6 @@ public:
   /// Return all SGPR32 which satisfy the waves per execution unit requirement
   /// of the subtarget.
   ArrayRef<MCPhysReg> getAllSGPR32(const MachineFunction &MF) const;
-
-  /// Return all VGPR32 which satisfy the waves per execution unit requirement
-  /// of the subtarget.
-  ArrayRef<MCPhysReg> getAllVGPR32(const MachineFunction &MF) const;
 
 private:
   void buildSpillLoadStore(MachineBasicBlock::iterator MI,

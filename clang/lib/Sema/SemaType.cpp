@@ -2273,13 +2273,8 @@ static ExprResult checkArraySize(Sema &S, Expr *&ArraySize,
     }
   } Diagnoser(VLADiag, VLAIsError);
 
-  // FIXME: GCC does *not* allow folding here in general; see PR44406.
-  // For GCC compatibility, we should remove this folding and leave it to
-  // TryFixVariablyModifiedType to convert VLAs to constant array types.
-  ExprResult R = S.VerifyIntegerConstantExpression(
-      ArraySize, &SizeVal, Diagnoser,
-      (S.LangOpts.GNUMode || S.LangOpts.OpenCL) ? Sema::AllowFold
-                                                : Sema::NoFold);
+  ExprResult R =
+      S.VerifyIntegerConstantExpression(ArraySize, &SizeVal, Diagnoser);
   if (Diagnoser.IsVLA)
     return ExprResult();
   return R;
@@ -4139,7 +4134,8 @@ static FileID getNullabilityCompletenessCheckFileID(Sema &S,
 
 /// Creates a fix-it to insert a C-style nullability keyword at \p pointerLoc,
 /// taking into account whitespace before and after.
-static void fixItNullability(Sema &S, DiagnosticBuilder &Diag,
+template <typename DiagBuilderT>
+static void fixItNullability(Sema &S, DiagBuilderT &Diag,
                              SourceLocation PointerLoc,
                              NullabilityKind Nullability) {
   assert(PointerLoc.isValid());

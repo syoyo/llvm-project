@@ -151,7 +151,18 @@ def : PredicateProlog<[{
   (void)STI;
 }]>;
 
-def IsPredicatedPred : SchedPredicate<[{TII->isPredicated(*MI)}]>;
+def IsPredicated : CheckFunctionPredicateWithTII<
+  "ARM_MC::isPredicated",
+  "isPredicated"
+>;
+def IsPredicatedPred : MCSchedPredicate<IsPredicated>;
+
+def IsCPSRDefined : CheckFunctionPredicateWithTII<
+  "ARM_MC::isCPSRDefined",
+  "ARMBaseInstrInfo::isCPSRDefined"
+>;
+
+def IsCPSRDefinedPred : MCSchedPredicate<IsCPSRDefined>;
 
 //===----------------------------------------------------------------------===//
 // Instruction Itinerary classes used for ARM
