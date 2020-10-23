@@ -155,7 +155,7 @@ ContentCache::getBufferOrNone(DiagnosticsEngine &Diag, FileManager &FM,
 
   // Check that the file's size is the same as in the file entry (which may
   // have come from a stat cache).
-  if (getRawBuffer()->getBufferSize() != (size_t)ContentsEntry->getSize()) {
+  if (Buffer->getBufferSize() != (size_t)ContentsEntry->getSize()) {
     if (Diag.isDiagnosticInFlight())
       Diag.SetDelayedDiagnostic(diag::err_file_modified,
                                 ContentsEntry->getName());
@@ -345,12 +345,11 @@ void SourceManager::clearIDTables() {
   createExpansionLoc(SourceLocation(), SourceLocation(), SourceLocation(), 1);
 }
 
-bool SourceManager::isMainFile(FileEntryRef SourceFile) {
+bool SourceManager::isMainFile(const FileEntry &SourceFile) {
   assert(MainFileID.isValid() && "expected initialized SourceManager");
-  auto FE = getFileEntryRefForID(MainFileID);
-  if (!FE)
-    return false;
-  return FE->getUID() == SourceFile.getUID();
+  if (auto *FE = getFileEntryForID(MainFileID))
+    return FE->getUID() == SourceFile.getUID();
+  return false;
 }
 
 void SourceManager::initializeForReplay(const SourceManager &Old) {
@@ -363,7 +362,7 @@ void SourceManager::initializeForReplay(const SourceManager &Old) {
     Clone->BufferOverridden = Cache->BufferOverridden;
     Clone->IsFileVolatile = Cache->IsFileVolatile;
     Clone->IsTransient = Cache->IsTransient;
-    Clone->setUnownedBuffer(Cache->getRawBuffer());
+    Clone->setUnownedBuffer(Cache->getBufferIfLoaded());
     return Clone;
   };
 
@@ -476,7 +475,8 @@ const SrcMgr::ContentCache *
 SourceManager::getFakeContentCacheForRecovery() const {
   if (!FakeContentCacheForRecovery) {
     FakeContentCacheForRecovery = std::make_unique<SrcMgr::ContentCache>();
-    FakeContentCacheForRecovery->setUnownedBuffer(getFakeBufferForRecovery());
+    FakeContentCacheForRecovery->setUnownedBuffer(
+        getFakeBufferForRecovery()->getMemBufferRef());
   }
   return FakeContentCacheForRecovery.get();
 }
@@ -725,16 +725,13 @@ void SourceManager::setFileIsTransient(const FileEntry *File) {
   const_cast<SrcMgr::ContentCache *>(CC)->IsTransient = true;
 }
 
-Optional<FileEntryRef> SourceManager::getFileEntryRefForID(FileID FID) const {
-  bool Invalid = false;
-  const SrcMgr::SLocEntry &Entry = getSLocEntry(FID, &Invalid);
-  if (Invalid || !Entry.isFile())
-    return None;
-
-  const SrcMgr::ContentCache *Content = Entry.getFile().getContentCache();
-  if (!Content || !Content->OrigEntry)
-    return None;
-  return FileEntryRef(Entry.getFile().getName(), *Content->OrigEntry);
+Optional<StringRef>
+SourceManager::getNonBuiltinFilenameForID(FileID FID) const {
+  if (const SrcMgr::SLocEntry *Entry = getSLocEntryForFile(FID))
+    if (auto *Content = Entry->getFile().getContentCache())
+      if (Content->OrigEntry)
+        return Entry->getFile().getName();
+  return None;
 }
 
 StringRef SourceManager::getBufferData(FileID FID, bool *Invalid) const {
@@ -746,26 +743,16 @@ StringRef SourceManager::getBufferData(FileID FID, bool *Invalid) const {
 
 llvm::Optional<StringRef>
 SourceManager::getBufferDataIfLoaded(FileID FID) const {
-  bool MyInvalid = false;
-  const SLocEntry &SLoc = getSLocEntry(FID, &MyInvalid);
-  if (!SLoc.isFile() || MyInvalid)
-    return None;
-
-  if (const llvm::MemoryBuffer *Buf =
-          SLoc.getFile().getContentCache()->getRawBuffer())
-    return Buf->getBuffer();
+  if (const SrcMgr::SLocEntry *Entry = getSLocEntryForFile(FID))
+    return Entry->getFile().getContentCache()->getBufferDataIfLoaded();
   return None;
 }
 
 llvm::Optional<StringRef> SourceManager::getBufferDataOrNone(FileID FID) const {
-  bool MyInvalid = false;
-  const SLocEntry &SLoc = getSLocEntry(FID, &MyInvalid);
-  if (!SLoc.isFile() || MyInvalid)
-    return None;
-
-  if (auto B = SLoc.getFile().getContentCache()->getBufferOrNone(
-          Diag, getFileManager(), SourceLocation()))
-    return B->getBuffer();
+  if (const SrcMgr::SLocEntry *Entry = getSLocEntryForFile(FID))
+    if (auto B = Entry->getFile().getContentCache()->getBufferOrNone(
+            Diag, getFileManager(), SourceLocation()))
+      return B->getBuffer();
   return None;
 }
 
@@ -1445,12 +1432,11 @@ SrcMgr::CharacteristicKind
 SourceManager::getFileCharacteristic(SourceLocation Loc) const {
   assert(Loc.isValid() && "Can't get file characteristic of invalid loc!");
   std::pair<FileID, unsigned> LocInfo = getDecomposedExpansionLoc(Loc);
-  bool Invalid = false;
-  const SLocEntry &SEntry = getSLocEntry(LocInfo.first, &Invalid);
-  if (Invalid || !SEntry.isFile())
+  const SLocEntry *SEntry = getSLocEntryForFile(LocInfo.first);
+  if (!SEntry)
     return C_User;
 
-  const SrcMgr::FileInfo &FI = SEntry.getFile();
+  const SrcMgr::FileInfo &FI = SEntry->getFile();
 
   // If there are no #line directives in this file, just return the whole-file
   // state.
@@ -1571,12 +1557,11 @@ bool SourceManager::isInMainFile(SourceLocation Loc) const {
   // Presumed locations are always for expansion points.
   std::pair<FileID, unsigned> LocInfo = getDecomposedExpansionLoc(Loc);
 
-  bool Invalid = false;
-  const SLocEntry &Entry = getSLocEntry(LocInfo.first, &Invalid);
-  if (Invalid || !Entry.isFile())
+  const SLocEntry *Entry = getSLocEntryForFile(LocInfo.first);
+  if (!Entry)
     return false;
 
-  const SrcMgr::FileInfo &FI = Entry.getFile();
+  const SrcMgr::FileInfo &FI = Entry->getFile();
 
   // Check if there is a line directive for this location.
   if (FI.hasLineDirectives())
@@ -1763,7 +1748,12 @@ void SourceManager::computeMacroArgsCache(MacroArgsMap &MacroArgsCache,
     if (Invalid)
       return;
     if (Entry.isFile()) {
-      SourceLocation IncludeLoc = Entry.getFile().getIncludeLoc();
+      auto& File = Entry.getFile();
+      if (File.getFileCharacteristic() == C_User_ModuleMap ||
+          File.getFileCharacteristic() == C_System_ModuleMap)
+        continue;
+
+      SourceLocation IncludeLoc = File.getIncludeLoc();
       bool IncludedInFID =
           (IncludeLoc.isValid() && isInFileID(IncludeLoc, FID)) ||
           // Predefined header doesn't have a valid include location in main

@@ -164,7 +164,7 @@ private:
     SmallVector<InfixCalculatorTok, 4> InfixOperatorStack;
     SmallVector<ICToken, 4> PostfixStack;
 
-    bool isUnaryOperator(const InfixCalculatorTok Op) {
+    bool isUnaryOperator(InfixCalculatorTok Op) const {
       return Op == IC_NEG || Op == IC_NOT;
     }
 
@@ -395,25 +395,25 @@ private:
           MemExpr(false), OffsetOperator(false) {}
 
     void addImm(int64_t imm) { Imm += imm; }
-    short getBracCount() { return BracCount; }
-    bool isMemExpr() { return MemExpr; }
-    bool isOffsetOperator() { return OffsetOperator; }
-    SMLoc getOffsetLoc() { return OffsetOperatorLoc; }
-    unsigned getBaseReg() { return BaseReg; }
-    unsigned getIndexReg() { return IndexReg; }
-    unsigned getScale() { return Scale; }
-    const MCExpr *getSym() { return Sym; }
-    StringRef getSymName() { return SymName; }
-    StringRef getType() { return CurType.Name; }
-    unsigned getSize() { return CurType.Size; }
-    unsigned getElementSize() { return CurType.ElementSize; }
-    unsigned getLength() { return CurType.Length; }
+    short getBracCount() const { return BracCount; }
+    bool isMemExpr() const { return MemExpr; }
+    bool isOffsetOperator() const { return OffsetOperator; }
+    SMLoc getOffsetLoc() const { return OffsetOperatorLoc; }
+    unsigned getBaseReg() const { return BaseReg; }
+    unsigned getIndexReg() const { return IndexReg; }
+    unsigned getScale() const { return Scale; }
+    const MCExpr *getSym() const { return Sym; }
+    StringRef getSymName() const { return SymName; }
+    StringRef getType() const { return CurType.Name; }
+    unsigned getSize() const { return CurType.Size; }
+    unsigned getElementSize() const { return CurType.ElementSize; }
+    unsigned getLength() const { return CurType.Length; }
     int64_t getImm() { return Imm + IC.execute(); }
-    bool isValidEndState() {
+    bool isValidEndState() const {
       return State == IES_RBRAC || State == IES_INTEGER;
     }
-    bool hadError() { return State == IES_ERROR; }
-    InlineAsmIdentifierInfo &getIdentifierInfo() { return Info; }
+    bool hadError() const { return State == IES_ERROR; }
+    const InlineAsmIdentifierInfo &getIdentifierInfo() const { return Info; }
 
     void onOr() {
       IntelExprState CurrState = State;
@@ -2313,7 +2313,7 @@ bool X86AsmParser::ParseIntelOperand(OperandVector &Operands) {
   // and we are parsing a segment override
   if (!SM.isMemExpr() && !RegNo) {
     if (isParsingMSInlineAsm() && SM.isOffsetOperator()) {
-      const InlineAsmIdentifierInfo Info = SM.getIdentifierInfo();
+      const InlineAsmIdentifierInfo &Info = SM.getIdentifierInfo();
       if (Info.isKind(InlineAsmIdentifierInfo::IK_Var)) {
         // Disp includes the address of a variable; make sure this is recorded
         // for later handling.
