@@ -226,6 +226,11 @@ ClassifyExpressions("scalar-evolution-classify-expressions",
     cl::Hidden, cl::init(true),
     cl::desc("When printing analysis, include information on every instruction"));
 
+static cl::opt<bool> UseExpensiveRangeSharpening(
+    "scalar-evolution-use-expensive-range-sharpening", cl::Hidden,
+    cl::init(false),
+    cl::desc("Use more powerful methods of sharpening expression ranges. May "
+             "be costly in terms of compile time"));
 
 //===----------------------------------------------------------------------===//
 //                           SCEV class definitions
@@ -5527,6 +5532,20 @@ ScalarEvolution::getRangeRef(const SCEV *S,
         ConservativeResult =
             ConservativeResult.intersectWith(RangeFromFactoring, RangeType);
       }
+
+      // Now try symbolic BE count and more powerful methods.
+      if (UseExpensiveRangeSharpening) {
+        const SCEV *SymbolicMaxBECount =
+            getSymbolicMaxBackedgeTakenCount(AddRec->getLoop());
+        if (!isa<SCEVCouldNotCompute>(SymbolicMaxBECount) &&
+            getTypeSizeInBits(MaxBECount->getType()) <= BitWidth &&
+            AddRec->hasNoSelfWrap()) {
+          auto RangeFromAffineNew = getRangeForAffineNoSelfWrappingAR(
+              AddRec, SymbolicMaxBECount, BitWidth, SignHint);
+          ConservativeResult =
+              ConservativeResult.intersectWith(RangeFromAffineNew, RangeType);
+        }
+      }
     }
 
     return setRange(AddRec, SignHint, std::move(ConservativeResult));
@@ -5694,6 +5713,71 @@ ConstantRange ScalarEvolution::getRangeForAffineAR(const SCEV *Start,
 
   // Finally, intersect signed and unsigned ranges.
   return SR.intersectWith(UR, ConstantRange::Smallest);
+}
+
+ConstantRange ScalarEvolution::getRangeForAffineNoSelfWrappingAR(
+    const SCEVAddRecExpr *AddRec, const SCEV *MaxBECount, unsigned BitWidth,
+    ScalarEvolution::RangeSignHint SignHint) {
+  assert(AddRec->isAffine() && "Non-affine AddRecs are not suppored!\n");
+  assert(AddRec->hasNoSelfWrap() &&
+         "This only works for non-self-wrapping AddRecs!");
+  const bool IsSigned = SignHint == HINT_RANGE_SIGNED;
+  const SCEV *Step = AddRec->getStepRecurrence(*this);
+  // Only deal with constant step to save compile time.
+  if (!isa<SCEVConstant>(Step))
+    return ConstantRange::getFull(BitWidth);
+  // Let's make sure that we can prove that we do not self-wrap during
+  // MaxBECount iterations. We need this because MaxBECount is a maximum
+  // iteration count estimate, and we might infer nw from some exit for which we
+  // do not know max exit count (or any other side reasoning).
+  // TODO: Turn into assert at some point.
+  MaxBECount = getNoopOrZeroExtend(MaxBECount, AddRec->getType());
+  const SCEV *RangeWidth = getMinusOne(AddRec->getType());
+  const SCEV *StepAbs = getUMinExpr(Step, getNegativeSCEV(Step));
+  const SCEV *MaxItersWithoutWrap = getUDivExpr(RangeWidth, StepAbs);
+  if (!isKnownPredicateViaConstantRanges(ICmpInst::ICMP_ULE, MaxBECount,
+                                         MaxItersWithoutWrap))
+    return ConstantRange::getFull(BitWidth);
+
+  ICmpInst::Predicate LEPred =
+      IsSigned ? ICmpInst::ICMP_SLE : ICmpInst::ICMP_ULE;
+  ICmpInst::Predicate GEPred =
+      IsSigned ? ICmpInst::ICMP_SGE : ICmpInst::ICMP_UGE;
+  const SCEV *End = AddRec->evaluateAtIteration(MaxBECount, *this);
+
+  // We know that there is no self-wrap. Let's take Start and End values and
+  // look at all intermediate values V1, V2, ..., Vn that IndVar takes during
+  // the iteration. They either lie inside the range [Min(Start, End),
+  // Max(Start, End)] or outside it:
+  //
+  // Case 1:   RangeMin    ...    Start V1 ... VN End ...           RangeMax;
+  // Case 2:   RangeMin Vk ... V1 Start    ...    End Vn ... Vk + 1 RangeMax;
+  //
+  // No self wrap flag guarantees that the intermediate values cannot be BOTH
+  // outside and inside the range [Min(Start, End), Max(Start, End)]. Using that
+  // knowledge, let's try to prove that we are dealing with Case 1. It is so if
+  // Start <= End and step is positive, or Start >= End and step is negative.
+  const SCEV *Start = AddRec->getStart();
+  ConstantRange StartRange = getRangeRef(Start, SignHint);
+  ConstantRange EndRange = getRangeRef(End, SignHint);
+  ConstantRange RangeBetween = StartRange.unionWith(EndRange);
+  // If they already cover full iteration space, we will know nothing useful
+  // even if we prove what we want to prove.
+  if (RangeBetween.isFullSet())
+    return RangeBetween;
+  // Only deal with ranges that do not wrap (i.e. RangeMin < RangeMax).
+  bool IsWrappedSet = IsSigned ? RangeBetween.isSignWrappedSet()
+                               : RangeBetween.isWrappedSet();
+  if (IsWrappedSet)
+    return ConstantRange::getFull(BitWidth);
+
+  if (isKnownPositive(Step) &&
+      isKnownPredicateViaConstantRanges(LEPred, Start, End))
+    return RangeBetween;
+  else if (isKnownNegative(Step) &&
+           isKnownPredicateViaConstantRanges(GEPred, Start, End))
+    return RangeBetween;
+  return ConstantRange::getFull(BitWidth);
 }
 
 ConstantRange ScalarEvolution::getRangeViaFactoring(const SCEV *Start,
@@ -9152,31 +9236,30 @@ bool ScalarEvolution::isKnownOnEveryIteration(ICmpInst::Predicate Pred,
          isLoopBackedgeGuardedByCond(L, Pred, LHS->getPostIncExpr(*this), RHS);
 }
 
-bool ScalarEvolution::isMonotonicPredicate(const SCEVAddRecExpr *LHS,
-                                           ICmpInst::Predicate Pred,
-                                           bool &Increasing) {
-  bool Result = isMonotonicPredicateImpl(LHS, Pred, Increasing);
+Optional<ScalarEvolution::MonotonicPredicateType>
+ScalarEvolution::getMonotonicPredicateType(const SCEVAddRecExpr *LHS,
+                                           ICmpInst::Predicate Pred) {
+  auto Result = getMonotonicPredicateTypeImpl(LHS, Pred);
 
 #ifndef NDEBUG
   // Verify an invariant: inverting the predicate should turn a monotonically
   // increasing change to a monotonically decreasing one, and vice versa.
-  bool IncreasingSwapped;
-  bool ResultSwapped = isMonotonicPredicateImpl(
-      LHS, ICmpInst::getSwappedPredicate(Pred), IncreasingSwapped);
+  if (Result) {
+    auto ResultSwapped =
+        getMonotonicPredicateTypeImpl(LHS, ICmpInst::getSwappedPredicate(Pred));
 
-  assert(Result == ResultSwapped && "should be able to analyze both!");
-  if (ResultSwapped)
-    assert(Increasing == !IncreasingSwapped &&
+    assert(ResultSwapped.hasValue() && "should be able to analyze both!");
+    assert(ResultSwapped.getValue() != Result.getValue() &&
            "monotonicity should flip as we flip the predicate");
+  }
 #endif
 
   return Result;
 }
 
-bool ScalarEvolution::isMonotonicPredicateImpl(const SCEVAddRecExpr *LHS,
-                                               ICmpInst::Predicate Pred,
-                                               bool &Increasing) {
-
+Optional<ScalarEvolution::MonotonicPredicateType>
+ScalarEvolution::getMonotonicPredicateTypeImpl(const SCEVAddRecExpr *LHS,
+                                               ICmpInst::Predicate Pred) {
   // A zero step value for LHS means the induction variable is essentially a
   // loop invariant value. We don't really depend on the predicate actually
   // flipping from false to true (for increasing predicates, and the other way
@@ -9187,45 +9270,35 @@ bool ScalarEvolution::isMonotonicPredicateImpl(const SCEVAddRecExpr *LHS,
   // where SCEV can prove X >= 0 but not prove X > 0, so it is helpful to be
   // as general as possible.
 
-  switch (Pred) {
-  default:
-    return false; // Conservative answer
+  // Only handle LE/LT/GE/GT predicates.
+  if (!ICmpInst::isRelational(Pred))
+    return None;
 
-  case ICmpInst::ICMP_UGT:
-  case ICmpInst::ICMP_UGE:
-  case ICmpInst::ICMP_ULT:
-  case ICmpInst::ICMP_ULE:
+  bool IsGreater = ICmpInst::isGE(Pred) || ICmpInst::isGT(Pred);
+  assert((IsGreater || ICmpInst::isLE(Pred) || ICmpInst::isLT(Pred)) &&
+         "Should be greater or less!");
+
+  // Check that AR does not wrap.
+  if (ICmpInst::isUnsigned(Pred)) {
     if (!LHS->hasNoUnsignedWrap())
-      return false;
-
-    Increasing = Pred == ICmpInst::ICMP_UGT || Pred == ICmpInst::ICMP_UGE;
-    return true;
-
-  case ICmpInst::ICMP_SGT:
-  case ICmpInst::ICMP_SGE:
-  case ICmpInst::ICMP_SLT:
-  case ICmpInst::ICMP_SLE: {
+      return None;
+    return IsGreater ? MonotonicallyIncreasing : MonotonicallyDecreasing;
+  } else {
+    assert(ICmpInst::isSigned(Pred) &&
+           "Relational predicate is either signed or unsigned!");
     if (!LHS->hasNoSignedWrap())
-      return false;
+      return None;
 
     const SCEV *Step = LHS->getStepRecurrence(*this);
 
-    if (isKnownNonNegative(Step)) {
-      Increasing = Pred == ICmpInst::ICMP_SGT || Pred == ICmpInst::ICMP_SGE;
-      return true;
-    }
+    if (isKnownNonNegative(Step))
+      return IsGreater ? MonotonicallyIncreasing : MonotonicallyDecreasing;
 
-    if (isKnownNonPositive(Step)) {
-      Increasing = Pred == ICmpInst::ICMP_SLT || Pred == ICmpInst::ICMP_SLE;
-      return true;
-    }
+    if (isKnownNonPositive(Step))
+      return !IsGreater ? MonotonicallyIncreasing : MonotonicallyDecreasing;
 
-    return false;
+    return None;
   }
-
-  }
-
-  llvm_unreachable("switch has default clause!");
 }
 
 bool ScalarEvolution::isLoopInvariantPredicate(
@@ -9246,10 +9319,9 @@ bool ScalarEvolution::isLoopInvariantPredicate(
   if (!ArLHS || ArLHS->getLoop() != L)
     return false;
 
-  bool Increasing;
-  if (!isMonotonicPredicate(ArLHS, Pred, Increasing))
+  auto MonotonicType = getMonotonicPredicateType(ArLHS, Pred);
+  if (!MonotonicType)
     return false;
-
   // If the predicate "ArLHS `Pred` RHS" monotonically increases from false to
   // true as the loop iterates, and the backedge is control dependent on
   // "ArLHS `Pred` RHS" == true then we can reason as follows:
@@ -9267,7 +9339,7 @@ bool ScalarEvolution::isLoopInvariantPredicate(
   //
   // A similar reasoning applies for a monotonically decreasing predicate, by
   // replacing true with false and false with true in the above two bullets.
-
+  bool Increasing = *MonotonicType == ScalarEvolution::MonotonicallyIncreasing;
   auto P = Increasing ? Pred : ICmpInst::getInversePredicate(Pred);
 
   if (!isLoopBackedgeGuardedByCond(L, P, LHS, RHS))
@@ -9275,6 +9347,75 @@ bool ScalarEvolution::isLoopInvariantPredicate(
 
   InvariantPred = Pred;
   InvariantLHS = ArLHS->getStart();
+  InvariantRHS = RHS;
+  return true;
+}
+
+bool ScalarEvolution::isLoopInvariantExitCondDuringFirstIterations(
+    ICmpInst::Predicate Pred, const SCEV *LHS, const SCEV *RHS, const Loop *L,
+    const Instruction *Context, const SCEV *MaxIter,
+    ICmpInst::Predicate &InvariantPred, const SCEV *&InvariantLHS,
+    const SCEV *&InvariantRHS) {
+  // Try to prove the following set of facts:
+  // - The predicate is monotonic.
+  // - If the check does not fail on the 1st iteration:
+  //   - No overflow will happen during first MaxIter iterations;
+  //   - It will not fail on the MaxIter'th iteration.
+  // If the check does fail on the 1st iteration, we leave the loop and no
+  // other checks matter.
+
+  // If there is a loop-invariant, force it into the RHS, otherwise bail out.
+  if (!isLoopInvariant(RHS, L)) {
+    if (!isLoopInvariant(LHS, L))
+      return false;
+
+    std::swap(LHS, RHS);
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+  }
+
+  auto *AR = dyn_cast<SCEVAddRecExpr>(LHS);
+  // TODO: Lift affinity limitation in the future.
+  if (!AR || AR->getLoop() != L || !AR->isAffine())
+    return false;
+
+  // The predicate must be relational (i.e. <, <=, >=, >).
+  if (!ICmpInst::isRelational(Pred))
+    return false;
+
+  // TODO: Support steps other than +/- 1.
+  const SCEV *Step = AR->getOperand(1);
+  auto *One = getOne(Step->getType());
+  auto *MinusOne = getNegativeSCEV(One);
+  if (Step != One && Step != MinusOne)
+    return false;
+
+  // Type mismatch here means that MaxIter is potentially larger than max
+  // unsigned value in start type, which mean we cannot prove no wrap for the
+  // indvar.
+  if (AR->getType() != MaxIter->getType())
+    return false;
+
+  // Value of IV on suggested last iteration.
+  const SCEV *Last = AR->evaluateAtIteration(MaxIter, *this);
+  // Does it still meet the requirement?
+  if (!isKnownPredicateAt(Pred, Last, RHS, Context))
+    return false;
+  // Because step is +/- 1 and MaxIter has same type as Start (i.e. it does
+  // not exceed max unsigned value of this type), this effectively proves
+  // that there is no wrap during the iteration. To prove that there is no
+  // signed/unsigned wrap, we need to check that
+  // Start <= Last for step = 1 or Start >= Last for step = -1.
+  ICmpInst::Predicate NoOverflowPred =
+      CmpInst::isSigned(Pred) ? ICmpInst::ICMP_SLE : ICmpInst::ICMP_ULE;
+  if (Step == MinusOne)
+    NoOverflowPred = CmpInst::getSwappedPredicate(NoOverflowPred);
+  const SCEV *Start = AR->getStart();
+  if (!isKnownPredicateAt(NoOverflowPred, Start, Last, Context))
+    return false;
+
+  // Everything is fine.
+  InvariantPred = Pred;
+  InvariantLHS = Start;
   InvariantRHS = RHS;
   return true;
 }
@@ -9710,6 +9851,25 @@ bool ScalarEvolution::isImpliedCond(ICmpInst::Predicate Pred, const SCEV *LHS,
   // Balance the types.
   if (getTypeSizeInBits(LHS->getType()) <
       getTypeSizeInBits(FoundLHS->getType())) {
+    // For unsigned and equality predicates, try to prove that both found
+    // operands fit into narrow unsigned range. If so, try to prove facts in
+    // narrow types.
+    if (!CmpInst::isSigned(FoundPred)) {
+      auto *NarrowType = LHS->getType();
+      auto *WideType = FoundLHS->getType();
+      auto BitWidth = getTypeSizeInBits(NarrowType);
+      const SCEV *MaxValue = getZeroExtendExpr(
+          getConstant(APInt::getMaxValue(BitWidth)), WideType);
+      if (isKnownPredicate(ICmpInst::ICMP_ULE, FoundLHS, MaxValue) &&
+          isKnownPredicate(ICmpInst::ICMP_ULE, FoundRHS, MaxValue)) {
+        const SCEV *TruncFoundLHS = getTruncateExpr(FoundLHS, NarrowType);
+        const SCEV *TruncFoundRHS = getTruncateExpr(FoundRHS, NarrowType);
+        if (isImpliedCondBalancedTypes(Pred, LHS, RHS, FoundPred, TruncFoundLHS,
+                                       TruncFoundRHS, Context))
+          return true;
+      }
+    }
+
     if (CmpInst::isSigned(Pred)) {
       LHS = getSignExtendExpr(LHS, FoundLHS->getType());
       RHS = getSignExtendExpr(RHS, FoundLHS->getType());
@@ -12686,11 +12846,24 @@ void PredicatedScalarEvolution::print(raw_ostream &OS, unsigned Depth) const {
 }
 
 // Match the mathematical pattern A - (A / B) * B, where A and B can be
-// arbitrary expressions.
+// arbitrary expressions. Also match zext (trunc A to iB) to iY, which is used
+// for URem with constant power-of-2 second operands.
 // It's not always easy, as A and B can be folded (imagine A is X / 2, and B is
 // 4, A / B becomes X / 8).
 bool ScalarEvolution::matchURem(const SCEV *Expr, const SCEV *&LHS,
                                 const SCEV *&RHS) {
+  // Try to match 'zext (trunc A to iB) to iY', which is used
+  // for URem with constant power-of-2 second operands. Make sure the size of
+  // the operand A matches the size of the whole expressions.
+  if (const auto *ZExt = dyn_cast<SCEVZeroExtendExpr>(Expr))
+    if (const auto *Trunc = dyn_cast<SCEVTruncateExpr>(ZExt->getOperand(0))) {
+      LHS = Trunc->getOperand();
+      if (LHS->getType() != Expr->getType())
+        LHS = getZeroExtendExpr(LHS, Expr->getType());
+      RHS = getConstant(APInt(getTypeSizeInBits(Expr->getType()), 1)
+                        << getTypeSizeInBits(Trunc->getType()));
+      return true;
+    }
   const auto *Add = dyn_cast<SCEVAddExpr>(Expr);
   if (Add == nullptr || Add->getNumOperands() != 2)
     return false;
