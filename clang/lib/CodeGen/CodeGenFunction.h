@@ -1407,6 +1407,13 @@ private:
   llvm::MDNode *createProfileWeightsForLoop(const Stmt *Cond,
                                             uint64_t LoopCount) const;
 
+  /// Calculate the branch weight for PGO data or the likelihood attribute.
+  /// The function tries to get the weight of \ref createProfileWeightsForLoop.
+  /// If that fails it gets the weight of \ref createBranchWeights.
+  llvm::MDNode *createProfileOrBranchWeightsForLoop(const Stmt *Cond,
+                                                    uint64_t LoopCount,
+                                                    const Stmt *Body) const;
+
 public:
   /// Increment the profiler's counter for the given statement by \p StepV.
   /// If \p StepV is null, the default increment is 1.
@@ -4095,7 +4102,7 @@ private:
 public:
   llvm::Value *EmitMSVCBuiltinExpr(MSVCIntrin BuiltinID, const CallExpr *E);
 
-  llvm::Value *EmitBuiltinAvailable(ArrayRef<llvm::Value *> Args);
+  llvm::Value *EmitBuiltinAvailable(const VersionTuple &Version);
 
   llvm::Value *EmitObjCProtocolExpr(const ObjCProtocolExpr *E);
   llvm::Value *EmitObjCStringLiteral(const ObjCStringLiteral *E);
