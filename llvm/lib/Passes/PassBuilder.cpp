@@ -51,6 +51,7 @@
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/ModuleDebugInfoPrinter.h"
 #include "llvm/Analysis/ModuleSummaryAnalysis.h"
+#include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/ObjCARCAliasAnalysis.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/PhiValues.h"
@@ -1318,7 +1319,7 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
 
   // Apply module pipeline start EP callback.
   for (auto &C : PipelineStartEPCallbacks)
-    C(MPM);
+    C(MPM, Level);
 
   if (PGOOpt && PGOOpt->SamplePGOSupport)
     MPM.addPass(createModuleToFunctionPassAdaptor(AddDiscriminatorsPass()));
@@ -1347,7 +1348,7 @@ PassBuilder::buildThinLTOPreLinkDefaultPipeline(OptimizationLevel Level) {
 
   // Apply module pipeline start EP callback.
   for (auto &C : PipelineStartEPCallbacks)
-    C(MPM);
+    C(MPM, Level);
 
   // If we are planning to perform ThinLTO later, we don't bloat the code with
   // unrolling/vectorization/... now. Just simplify the module as much as we
