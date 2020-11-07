@@ -1114,20 +1114,15 @@ BranchProbabilityInfo::getEdgeProbability(const BasicBlock *Src,
 BranchProbability
 BranchProbabilityInfo::getEdgeProbability(const BasicBlock *Src,
                                           const BasicBlock *Dst) const {
+  if (!Probs.count(std::make_pair(Src, 0)))
+    return BranchProbability(llvm::count(successors(Src), Dst), succ_size(Src));
+
   auto Prob = BranchProbability::getZero();
-  bool FoundProb = false;
-  uint32_t EdgeCount = 0;
   for (const_succ_iterator I = succ_begin(Src), E = succ_end(Src); I != E; ++I)
-    if (*I == Dst) {
-      ++EdgeCount;
-      auto MapI = Probs.find(std::make_pair(Src, I.getSuccessorIndex()));
-      if (MapI != Probs.end()) {
-        FoundProb = true;
-        Prob += MapI->second;
-      }
-    }
-  uint32_t succ_num = std::distance(succ_begin(Src), succ_end(Src));
-  return FoundProb ? Prob : BranchProbability(EdgeCount, succ_num);
+    if (*I == Dst)
+      Prob += Probs.find(std::make_pair(Src, I.getSuccessorIndex()))->second;
+
+  return Prob;
 }
 
 /// Set the edge probability for all edges at once.
@@ -1138,10 +1133,10 @@ void BranchProbabilityInfo::setEdgeProbability(
   if (Probs.size() == 0)
     return; // Nothing to set.
 
+  Handles.insert(BasicBlockCallbackVH(Src, this));
   uint64_t TotalNumerator = 0;
   for (unsigned SuccIdx = 0; SuccIdx < Probs.size(); ++SuccIdx) {
     this->Probs[std::make_pair(Src, SuccIdx)] = Probs[SuccIdx];
-    Handles.insert(BasicBlockCallbackVH(Src, this));
     LLVM_DEBUG(dbgs() << "set edge " << Src->getName() << " -> " << SuccIdx
                       << " successor probability to " << Probs[SuccIdx]
                       << "\n");
@@ -1155,6 +1150,25 @@ void BranchProbabilityInfo::setEdgeProbability(
   // should be within Probs.size / BranchProbability::getDenominator.
   assert(TotalNumerator <= BranchProbability::getDenominator() + Probs.size());
   assert(TotalNumerator >= BranchProbability::getDenominator() - Probs.size());
+}
+
+void BranchProbabilityInfo::copyEdgeProbabilities(BasicBlock *Src,
+                                                  BasicBlock *Dst) {
+  eraseBlock(Dst); // Erase stale data if any.
+  unsigned NumSuccessors = Src->getTerminator()->getNumSuccessors();
+  assert(NumSuccessors == Dst->getTerminator()->getNumSuccessors());
+  if (NumSuccessors == 0)
+    return; // Nothing to set.
+  if (this->Probs.find(std::make_pair(Src, 0)) == this->Probs.end())
+    return; // No probability is set for edges from Src. Keep the same for Dst.
+
+  Handles.insert(BasicBlockCallbackVH(Dst, this));
+  for (unsigned SuccIdx = 0; SuccIdx < NumSuccessors; ++SuccIdx) {
+    auto Prob = this->Probs[std::make_pair(Src, SuccIdx)];
+    this->Probs[std::make_pair(Dst, SuccIdx)] = Prob;
+    LLVM_DEBUG(dbgs() << "set edge " << Dst->getName() << " -> " << SuccIdx
+                      << " successor probability to " << Prob << "\n");
+  }
 }
 
 raw_ostream &
@@ -1177,6 +1191,7 @@ void BranchProbabilityInfo::eraseBlock(const BasicBlock *BB) {
   // a pair (BB, N) if there is no data for (BB, N-1) because the data is always
   // set for all successors from 0 to M at once by the method
   // setEdgeProbability().
+  Handles.erase(BasicBlockCallbackVH(BB, this));
   for (unsigned I = 0;; ++I) {
     auto MapI = Probs.find(std::make_pair(BB, I));
     if (MapI == Probs.end()) {
