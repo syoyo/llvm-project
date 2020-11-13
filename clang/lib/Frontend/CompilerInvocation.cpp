@@ -2183,6 +2183,8 @@ static void ParseHeaderSearchArgs(HeaderSearchOptions &Opts, ArgList &Args,
       !Args.hasArg(OPT_fmodules_disable_diagnostic_validation);
   Opts.ImplicitModuleMaps = Args.hasArg(OPT_fimplicit_module_maps);
   Opts.ModuleMapFileHomeIsCwd = Args.hasArg(OPT_fmodule_map_file_home_is_cwd);
+  Opts.EnablePrebuiltImplicitModules =
+      Args.hasArg(OPT_fprebuilt_implicit_modules);
   Opts.ModuleCachePruneInterval =
       getLastArgIntValue(Args, OPT_fmodules_prune_interval, 7 * 24 * 60 * 60);
   Opts.ModuleCachePruneAfter =
@@ -2585,6 +2587,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     LangStandard::Kind OpenCLLangStd
       = llvm::StringSwitch<LangStandard::Kind>(A->getValue())
         .Cases("cl", "CL", LangStandard::lang_opencl10)
+        .Cases("cl1.0", "CL1.0", LangStandard::lang_opencl10)
         .Cases("cl1.1", "CL1.1", LangStandard::lang_opencl11)
         .Cases("cl1.2", "CL1.2", LangStandard::lang_opencl12)
         .Cases("cl2.0", "CL2.0", LangStandard::lang_opencl20)
@@ -3332,9 +3335,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args) << Val;
   }
 
-  if (Args.hasArg(OPT_fexperimental_strict_floating_point))
-    Opts.ExpStrictFP = true;
-
   auto FPRM = llvm::RoundingMode::NearestTiesToEven;
   if (Args.hasArg(OPT_frounding_math)) {
     FPRM = llvm::RoundingMode::Dynamic;
@@ -4021,16 +4021,15 @@ void CompilerInvocation::generateCC1CommandLine(
 #undef OPTION_WITH_MARSHALLING_FLAG
 }
 
-namespace clang {
-
 IntrusiveRefCntPtr<llvm::vfs::FileSystem>
-createVFSFromCompilerInvocation(const CompilerInvocation &CI,
-                                DiagnosticsEngine &Diags) {
+clang::createVFSFromCompilerInvocation(const CompilerInvocation &CI,
+                                       DiagnosticsEngine &Diags) {
   return createVFSFromCompilerInvocation(CI, Diags,
                                          llvm::vfs::getRealFileSystem());
 }
 
-IntrusiveRefCntPtr<llvm::vfs::FileSystem> createVFSFromCompilerInvocation(
+IntrusiveRefCntPtr<llvm::vfs::FileSystem>
+clang::createVFSFromCompilerInvocation(
     const CompilerInvocation &CI, DiagnosticsEngine &Diags,
     IntrusiveRefCntPtr<llvm::vfs::FileSystem> BaseFS) {
   if (CI.getHeaderSearchOpts().VFSOverlayFiles.empty())
@@ -4058,5 +4057,3 @@ IntrusiveRefCntPtr<llvm::vfs::FileSystem> createVFSFromCompilerInvocation(
   }
   return Result;
 }
-
-} // namespace clang

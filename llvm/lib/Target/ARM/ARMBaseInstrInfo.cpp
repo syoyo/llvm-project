@@ -3368,7 +3368,7 @@ bool ARMBaseInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
     case ARM::t2SUBspImm:
     case ARM::t2ADDri:
     case ARM::t2SUBri:
-      MRI->setRegClass(UseMI.getOperand(0).getReg(), TRC);
+      MRI->constrainRegClass(UseMI.getOperand(0).getReg(), TRC);
   }
   return true;
 }
@@ -5949,8 +5949,8 @@ ARMBaseInstrInfo::getOutliningType(MachineBasicBlock::iterator &MIT,
 
   // Be conservative with ARMv8.1 MVE instructions.
   if (Opc == ARM::t2BF_LabelPseudo || Opc == ARM::t2DoLoopStart ||
-      Opc == ARM::t2WhileLoopStart || Opc == ARM::t2LoopDec ||
-      Opc == ARM::t2LoopEnd)
+      Opc == ARM::t2DoLoopStartTP || Opc == ARM::t2WhileLoopStart ||
+      Opc == ARM::t2LoopDec || Opc == ARM::t2LoopEnd)
     return outliner::InstrType::Illegal;
 
   const MCInstrDesc &MCID = MI.getDesc();
