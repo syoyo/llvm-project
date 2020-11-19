@@ -1010,12 +1010,46 @@ AArch64InstructionSelector::emitSelect(Register Dst, Register True,
 
   // By default, we'll try and emit a CSEL.
   unsigned Opc = Is32Bit ? AArch64::CSELWr : AArch64::CSELXr;
+  bool Optimized = false;
+  auto TryFoldBinOpIntoSelect = [&Opc, &False, Is32Bit, &MRI]() {
+    // Attempt to fold:
+    //
+    // sub = G_SUB 0, x
+    // select = G_SELECT cc, true, sub
+    //
+    // Into:
+    // select = CSNEG true, x, cc
+    Register MatchReg;
+    if (mi_match(False, MRI, m_Neg(m_Reg(MatchReg)))) {
+      Opc = Is32Bit ? AArch64::CSNEGWr : AArch64::CSNEGXr;
+      False = MatchReg;
+      return true;
+    }
+
+    // Attempt to fold:
+    //
+    // xor = G_XOR x, -1
+    // select = G_SELECT cc, true, xor
+    //
+    // Into:
+    // select = CSINV true, x, cc
+    if (mi_match(False, MRI, m_Not(m_Reg(MatchReg)))) {
+      Opc = Is32Bit ? AArch64::CSINVWr : AArch64::CSINVXr;
+      False = MatchReg;
+      return true;
+    }
+
+    return false;
+  };
 
   // Helper lambda which tries to use CSINC/CSINV for the instruction when its
   // true/false values are constants.
   // FIXME: All of these patterns already exist in tablegen. We should be
   // able to import these.
-  auto TryOptSelectCst = [&Opc, &True, &False, &CC, Is32Bit, &MRI]() {
+  auto TryOptSelectCst = [&Opc, &True, &False, &CC, Is32Bit, &MRI,
+                          &Optimized]() {
+    if (Optimized)
+      return false;
     auto TrueCst = getConstantVRegValWithLookThrough(True, MRI);
     auto FalseCst = getConstantVRegValWithLookThrough(False, MRI);
     if (!TrueCst && !FalseCst)
@@ -1083,23 +1117,11 @@ AArch64InstructionSelector::emitSelect(Register Dst, Register True,
     return false;
   };
 
-  TryOptSelectCst();
+  Optimized |= TryFoldBinOpIntoSelect();
+  Optimized |= TryOptSelectCst();
   auto SelectInst = MIB.buildInstr(Opc, {Dst}, {True, False}).addImm(CC);
   constrainSelectedInstRegOperands(*SelectInst, TII, TRI, RBI);
   return &*SelectInst;
-}
-
-/// Returns true if \p P is an unsigned integer comparison predicate.
-static bool isUnsignedICMPPred(const CmpInst::Predicate P) {
-  switch (P) {
-  default:
-    return false;
-  case CmpInst::ICMP_UGT:
-  case CmpInst::ICMP_UGE:
-  case CmpInst::ICMP_ULT:
-  case CmpInst::ICMP_ULE:
-    return true;
-  }
 }
 
 static AArch64CC::CondCode changeICMPPredToAArch64CC(CmpInst::Predicate P) {
@@ -1837,10 +1859,7 @@ bool AArch64InstructionSelector::convertPtrAddToAdd(
   // Also take the opportunity here to try to do some optimization.
   // Try to convert this into a G_SUB if the offset is a 0-x negate idiom.
   Register NegatedReg;
-  int64_t Cst;
-  if (!mi_match(I.getOperand(2).getReg(), MRI,
-                m_GSub(m_ICst(Cst), m_Reg(NegatedReg))) ||
-      Cst != 0)
+  if (!mi_match(I.getOperand(2).getReg(), MRI, m_Neg(m_Reg(NegatedReg))))
     return true;
   I.getOperand(2).setReg(NegatedReg);
   I.setDesc(TII.get(TargetOpcode::G_SUB));
@@ -4382,7 +4401,7 @@ MachineInstr *AArch64InstructionSelector::tryFoldIntegerCompare(
   // Produce this if the compare is signed:
   //
   // tst x, y
-  if (!isUnsignedICMPPred(P) && LHSDef &&
+  if (!CmpInst::isUnsigned(P) && LHSDef &&
       LHSDef->getOpcode() == TargetOpcode::G_AND) {
     // Make sure that the RHS is 0.
     auto ValAndVReg = getConstantVRegValWithLookThrough(RHS.getReg(), MRI);
@@ -5033,9 +5052,19 @@ AArch64InstructionSelector::selectExtendedSHL(
     return None;
 
   unsigned OffsetOpc = OffsetInst->getOpcode();
-  if (OffsetOpc != TargetOpcode::G_SHL && OffsetOpc != TargetOpcode::G_MUL)
-    return None;
+  bool LookedThroughZExt = false;
+  if (OffsetOpc != TargetOpcode::G_SHL && OffsetOpc != TargetOpcode::G_MUL) {
+    // Try to look through a ZEXT.
+    if (OffsetOpc != TargetOpcode::G_ZEXT || !WantsExt)
+      return None;
 
+    OffsetInst = MRI.getVRegDef(OffsetInst->getOperand(1).getReg());
+    OffsetOpc = OffsetInst->getOpcode();
+    LookedThroughZExt = true;
+
+    if (OffsetOpc != TargetOpcode::G_SHL && OffsetOpc != TargetOpcode::G_MUL)
+      return None;
+  }
   // Make sure that the memory op is a valid size.
   int64_t LegalShiftVal = Log2_32(SizeInBytes);
   if (LegalShiftVal == 0)
@@ -5086,20 +5115,23 @@ AArch64InstructionSelector::selectExtendedSHL(
 
   unsigned SignExtend = 0;
   if (WantsExt) {
-    // Check if the offset is defined by an extend.
-    MachineInstr *ExtInst = getDefIgnoringCopies(OffsetReg, MRI);
-    auto Ext = getExtendTypeForInst(*ExtInst, MRI, true);
-    if (Ext == AArch64_AM::InvalidShiftExtend)
-      return None;
+    // Check if the offset is defined by an extend, unless we looked through a
+    // G_ZEXT earlier.
+    if (!LookedThroughZExt) {
+      MachineInstr *ExtInst = getDefIgnoringCopies(OffsetReg, MRI);
+      auto Ext = getExtendTypeForInst(*ExtInst, MRI, true);
+      if (Ext == AArch64_AM::InvalidShiftExtend)
+        return None;
 
-    SignExtend = isSignExtendShiftType(Ext) ? 1 : 0;
-    // We only support SXTW for signed extension here.
-    if (SignExtend && Ext != AArch64_AM::SXTW)
-      return None;
+      SignExtend = isSignExtendShiftType(Ext) ? 1 : 0;
+      // We only support SXTW for signed extension here.
+      if (SignExtend && Ext != AArch64_AM::SXTW)
+        return None;
+      OffsetReg = ExtInst->getOperand(1).getReg();
+    }
 
     // Need a 32-bit wide register here.
     MachineIRBuilder MIB(*MRI.getVRegDef(Root.getReg()));
-    OffsetReg = ExtInst->getOperand(1).getReg();
     OffsetReg = narrowExtendRegIfNeeded(OffsetReg, MIB);
   }
 

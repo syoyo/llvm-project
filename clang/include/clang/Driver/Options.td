@@ -266,6 +266,12 @@ multiclass OptOutFFlag<string name, string pos_prefix, string neg_prefix,
                MarshallingInfoFlag<keypath, defaults>;
 }
 
+multiclass BooleanMarshalledFFlag<string name, code keypath, code default_value, string pos_help = "", string neg_help=""> {
+  def fno_#NAME : Flag<["-"], "fno-"#name>, HelpText<neg_help>;
+  def f#NAME : Flag<["-"], "f"#name>, HelpText<pos_help>,
+    MarshallingInfoBooleanFlag<keypath, default_value, !cast<Option>("fno_"#NAME)>;
+}
+
 /////////
 // Options
 
@@ -340,36 +346,53 @@ def ccc_objcmt_migrate : Separate<["-"], "ccc-objcmt-migrate">,
   InternalDriverOpt,
   HelpText<"Apply modifications and produces temporary files to migrate to "
    "modern ObjC syntax">;
+
 def objcmt_migrate_literals : Flag<["-"], "objcmt-migrate-literals">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to modern ObjC literals">;
+  HelpText<"Enable migration to modern ObjC literals">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_Literals">;
 def objcmt_migrate_subscripting : Flag<["-"], "objcmt-migrate-subscripting">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to modern ObjC subscripting">;
+  HelpText<"Enable migration to modern ObjC subscripting">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_Subscripting">;
 def objcmt_migrate_property : Flag<["-"], "objcmt-migrate-property">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to modern ObjC property">;
+  HelpText<"Enable migration to modern ObjC property">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_Property">;
 def objcmt_migrate_all : Flag<["-"], "objcmt-migrate-all">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to modern ObjC">;
+  HelpText<"Enable migration to modern ObjC">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_MigrateDecls">;
 def objcmt_migrate_readonly_property : Flag<["-"], "objcmt-migrate-readonly-property">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to modern ObjC readonly property">;
+  HelpText<"Enable migration to modern ObjC readonly property">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_ReadonlyProperty">;
 def objcmt_migrate_readwrite_property : Flag<["-"], "objcmt-migrate-readwrite-property">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to modern ObjC readwrite property">;
+  HelpText<"Enable migration to modern ObjC readwrite property">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_ReadwriteProperty">;
 def objcmt_migrate_property_dot_syntax : Flag<["-"], "objcmt-migrate-property-dot-syntax">, Flags<[CC1Option]>,
-  HelpText<"Enable migration of setter/getter messages to property-dot syntax">;
+  HelpText<"Enable migration of setter/getter messages to property-dot syntax">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_PropertyDotSyntax">;
 def objcmt_migrate_annotation : Flag<["-"], "objcmt-migrate-annotation">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to property and method annotations">;
+  HelpText<"Enable migration to property and method annotations">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_Annotation">;
 def objcmt_migrate_instancetype : Flag<["-"], "objcmt-migrate-instancetype">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to infer instancetype for method result type">;
+  HelpText<"Enable migration to infer instancetype for method result type">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_Instancetype">;
 def objcmt_migrate_nsmacros : Flag<["-"], "objcmt-migrate-ns-macros">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to NS_ENUM/NS_OPTIONS macros">;
+  HelpText<"Enable migration to NS_ENUM/NS_OPTIONS macros">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_NsMacros">;
 def objcmt_migrate_protocol_conformance : Flag<["-"], "objcmt-migrate-protocol-conformance">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to add protocol conformance on classes">;
+  HelpText<"Enable migration to add protocol conformance on classes">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_ProtocolConformance">;
 def objcmt_atomic_property : Flag<["-"], "objcmt-atomic-property">, Flags<[CC1Option]>,
-  HelpText<"Make migration to 'atomic' properties">;
+  HelpText<"Make migration to 'atomic' properties">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_AtomicProperty">;
 def objcmt_returns_innerpointer_property : Flag<["-"], "objcmt-returns-innerpointer-property">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to annotate property with NS_RETURNS_INNER_POINTER">;
+  HelpText<"Enable migration to annotate property with NS_RETURNS_INNER_POINTER">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_ReturnsInnerPointerProperty">;
 def objcmt_ns_nonatomic_iosonly: Flag<["-"], "objcmt-ns-nonatomic-iosonly">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to use NS_NONATOMIC_IOSONLY macro for setting property's 'atomic' attribute">;
+  HelpText<"Enable migration to use NS_NONATOMIC_IOSONLY macro for setting property's 'atomic' attribute">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_NsAtomicIOSOnlyProperty">;
 def objcmt_migrate_designated_init : Flag<["-"], "objcmt-migrate-designated-init">, Flags<[CC1Option]>,
-  HelpText<"Enable migration to infer NS_DESIGNATED_INITIALIZER for initializer methods">;
+  HelpText<"Enable migration to infer NS_DESIGNATED_INITIALIZER for initializer methods">,
+  MarshallingInfoBitfieldFlag<"FrontendOpts.ObjCMTAction", "FrontendOptions::ObjCMT_DesignatedInitializer">;
+
 def objcmt_whitelist_dir_path: Joined<["-"], "objcmt-whitelist-dir-path=">, Flags<[CC1Option]>,
   HelpText<"Only modify files with a filename contained in the provided directory path">;
 // The misspelt "white-list" [sic] alias is due for removal.
@@ -1303,9 +1326,9 @@ def fglobal_isel : Flag<["-"], "fglobal-isel">, Group<f_clang_Group>,
   HelpText<"Enables the global instruction selector">;
 def fexperimental_isel : Flag<["-"], "fexperimental-isel">, Group<f_clang_Group>,
   Alias<fglobal_isel>;
-def fexperimental_new_pass_manager : Flag<["-"], "fexperimental-new-pass-manager">,
-  Group<f_clang_Group>, Flags<[CC1Option]>,
-  HelpText<"Enables an experimental new pass manager in LLVM.">;
+defm experimental_new_pass_manager : BooleanMarshalledFFlag<"experimental-new-pass-manager", "CodeGenOpts.ExperimentalNewPassManager",
+  "static_cast<unsigned>(ENABLE_EXPERIMENTAL_NEW_PASS_MANAGER)", "Enables an experimental new pass manager in LLVM.",
+  "Disables an experimental new pass manager in LLVM.">, Group<f_clang_Group>, Flags<[CC1Option]>;
 def fexperimental_strict_floating_point : Flag<["-"], "fexperimental-strict-floating-point">,
   Group<f_clang_Group>, Flags<[CC1Option]>,
   HelpText<"Enables experimental strict floating point in LLVM.">,
@@ -1324,7 +1347,7 @@ def fcf_protection : Flag<["-"], "fcf-protection">, Group<f_Group>, Flags<[CoreO
   Alias<fcf_protection_EQ>, AliasArgs<["full"]>,
   HelpText<"Enable cf-protection in 'full' mode">;
 
-defm xray_instrument : OptInFFlag<"xray-instrument", "Generate XRay instrumentation sleds on function entry and exit">;
+defm xray_instrument : OptInFFlag<"xray-instrument", "Generate XRay instrumentation sleds on function entry and exit", "", "", [], "LangOpts->XRayInstrument">;
 
 def fxray_instruction_threshold_EQ :
   JoinedOrSeparate<["-"], "fxray-instruction-threshold=">,
@@ -1352,15 +1375,15 @@ def fxray_modes :
   HelpText<"List of modes to link in by default into XRay instrumented binaries.">;
 
 defm xray_always_emit_customevents : OptInFFlag<"xray-always-emit-customevents",
-  "Always emit __xray_customevent(...) calls even if the containing function is not always instrumented">;
+  "Always emit __xray_customevent(...) calls even if the containing function is not always instrumented", "", "", [], "LangOpts->XRayAlwaysEmitCustomEvents">;
 
 defm xray_always_emit_typedevents : OptInFFlag<"xray-always-emit-typedevents",
-  "Always emit __xray_typedevent(...) calls even if the containing function is not always instrumented">;
+  "Always emit __xray_typedevent(...) calls even if the containing function is not always instrumented", "", "", [], "LangOpts->XRayAlwaysEmitTypedEvents">;
 
 defm xray_ignore_loops : OptInFFlag<"xray-ignore-loops",
-  "Don't instrument functions with loops unless they also meet the minimum function size">;
+  "Don't instrument functions with loops unless they also meet the minimum function size", "", "", [], "CodeGenOpts.XRayIgnoreLoops">;
 defm xray_function_index : OptOutFFlag<"xray-function-index", "",
-  "Omit function index section at the expense of single-function patching performance">;
+  "Omit function index section at the expense of single-function patching performance", "", [], "CodeGenOpts.XRayOmitFunctionIndex">;
 
 def fxray_link_deps : Flag<["-"], "fxray-link-deps">, Group<f_Group>,
   Flags<[CC1Option]>,
@@ -1607,9 +1630,6 @@ def fno_global_isel : Flag<["-"], "fno-global-isel">, Group<f_clang_Group>,
   HelpText<"Disables the global instruction selector">;
 def fno_experimental_isel : Flag<["-"], "fno-experimental-isel">, Group<f_clang_Group>,
   Alias<fno_global_isel>;
-def fno_experimental_new_pass_manager : Flag<["-"], "fno-experimental-new-pass-manager">,
-  Group<f_clang_Group>, Flags<[CC1Option]>,
-  HelpText<"Disables an experimental new pass manager in LLVM.">;
 def fveclib : Joined<["-"], "fveclib=">, Group<f_Group>, Flags<[CC1Option]>,
     HelpText<"Use the given vector functions library">, Values<"Accelerate,libmvec,MASSV,SVML,none">;
 def fno_lax_vector_conversions : Flag<["-"], "fno-lax-vector-conversions">, Group<f_Group>,
@@ -1964,6 +1984,10 @@ can be analyzed with chrome://tracing or `Speedscope App
 def ftime_trace_granularity_EQ : Joined<["-"], "ftime-trace-granularity=">, Group<f_Group>,
   HelpText<"Minimum time granularity (in microseconds) traced by time profiler">,
   Flags<[CC1Option, CoreOption]>;
+def fproc_stat_report : Joined<["-"], "fproc-stat-report">, Group<f_Group>,
+  HelpText<"Print subprocess statistics">;
+def fproc_stat_report_EQ : Joined<["-"], "fproc-stat-report=">, Group<f_Group>,
+  HelpText<"Save subprocess statistics to the given file">;
 def ftlsmodel_EQ : Joined<["-"], "ftls-model=">, Group<f_Group>, Flags<[CC1Option]>;
 def ftrapv : Flag<["-"], "ftrapv">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Trap on integer overflow">;
@@ -2521,6 +2545,11 @@ def mno_wavefrontsize64 : Flag<["-"], "mno-wavefrontsize64">, Group<m_Group>,
 def mxnack : Flag<["-"], "mxnack">, Group<m_amdgpu_Features_Group>,
   HelpText<"Specify XNACK mode (AMDGPU only)">;
 def mno_xnack : Flag<["-"], "mno-xnack">, Group<m_amdgpu_Features_Group>;
+
+def munsafe_fp_atomics : Flag<["-"], "munsafe-fp-atomics">, Group<m_Group>,
+  HelpText<"Enable unsafe floating point atomic instructions (AMDGPU only)">,
+  Flags<[CC1Option]>;
+def mno_unsafe_fp_atomics : Flag<["-"], "mno-unsafe-fp-atomics">, Group<m_Group>;
 
 def faltivec : Flag<["-"], "faltivec">, Group<f_Group>, Flags<[NoXarchOption]>;
 def fno_altivec : Flag<["-"], "fno-altivec">, Group<f_Group>, Flags<[NoXarchOption]>;
@@ -3610,7 +3639,7 @@ def target_feature : Separate<["-"], "target-feature">,
   HelpText<"Target specific attributes">;
 def triple : Separate<["-"], "triple">,
   HelpText<"Specify target triple (e.g. i686-apple-darwin9)">,
-  MarshallingInfoString<"TargetOpts->Triple", "llvm::Triple::normalize(llvm::sys::getDefaultTargetTriple())", "std::string">,
+  MarshallingInfoString<"TargetOpts->Triple", "llvm::Triple::normalize(llvm::sys::getDefaultTargetTriple())">,
   AlwaysEmit, Normalizer<"normalizeTriple">, DenormalizeString;
 def target_abi : Separate<["-"], "target-abi">,
   HelpText<"Target a particular ABI type">;
@@ -3762,10 +3791,12 @@ def analyzer_werror : Flag<["-"], "analyzer-werror">,
 // Migrator Options
 //===----------------------------------------------------------------------===//
 def migrator_no_nsalloc_error : Flag<["-"], "no-ns-alloc-error">,
-  HelpText<"Do not error on use of NSAllocateCollectable/NSReallocateCollectable">;
+  HelpText<"Do not error on use of NSAllocateCollectable/NSReallocateCollectable">,
+  MarshallingInfoFlag<"MigratorOpts.NoNSAllocReallocError">;
 
 def migrator_no_finalize_removal : Flag<["-"], "no-finalize-removal">,
-  HelpText<"Do not remove finalize method in gc mode">;
+  HelpText<"Do not remove finalize method in gc mode">,
+  MarshallingInfoFlag<"MigratorOpts.NoFinalizeRemoval">;
 
 //===----------------------------------------------------------------------===//
 // CodeGen Options
@@ -3803,7 +3834,7 @@ def mrelocation_model : Separate<["-"], "mrelocation-model">,
   HelpText<"The relocation model to use">, Values<"static,pic,ropi,rwpi,ropi-rwpi,dynamic-no-pic">,
   NormalizedValuesScope<"llvm::Reloc">,
   NormalizedValues<["Static", "PIC_", "ROPI", "RWPI", "ROPI_RWPI", "DynamicNoPIC"]>,
-  MarshallingInfoString<"CodeGenOpts.RelocationModel", "PIC_", "Model">,
+  MarshallingInfoString<"CodeGenOpts.RelocationModel", "PIC_">,
   AutoNormalizeEnum;
 def fno_math_builtin : Flag<["-"], "fno-math-builtin">,
   HelpText<"Disable implicit builtin knowledge of math functions">;
@@ -4233,12 +4264,13 @@ def no_emit_llvm_uselists : Flag<["-"], "no-emit-llvm-uselists">,
 
 def mt_migrate_directory : Separate<["-"], "mt-migrate-directory">,
   HelpText<"Directory for temporary files produced during ARC or ObjC migration">;
-def arcmt_check : Flag<["-"], "arcmt-check">,
-  HelpText<"Check for ARC migration issues that need manual handling">;
-def arcmt_modify : Flag<["-"], "arcmt-modify">,
-  HelpText<"Apply modifications to files to conform to ARC">;
-def arcmt_migrate : Flag<["-"], "arcmt-migrate">,
-  HelpText<"Apply modifications and produces temporary files that conform to ARC">;
+
+def arcmt_action_EQ : Joined<["-"], "arcmt-action=">, Flags<[CC1Option, NoDriverOption]>,
+  HelpText<"The ARC migration action to take">, Values<"check,modify,migrate">,
+  NormalizedValuesScope<"FrontendOptions">,
+  NormalizedValues<["ARCMT_Check", "ARCMT_Modify", "ARCMT_Migrate"]>,
+  MarshallingInfoString<"FrontendOpts.ARCMTAction", "ARCMT_None">,
+  AutoNormalizeEnumJoined;
 
 def opt_record_file : Separate<["-"], "opt-record-file">,
   HelpText<"File name to use for YAML optimization record output">;
@@ -4327,6 +4359,8 @@ def fno_validate_pch : Flag<["-"], "fno-validate-pch">,
   HelpText<"Disable validation of precompiled headers">;
 def fallow_pch_with_errors : Flag<["-"], "fallow-pch-with-compiler-errors">,
   HelpText<"Accept a PCH file that was created with compiler errors">;
+def fallow_pcm_with_errors : Flag<["-"], "fallow-pcm-with-compiler-errors">,
+  HelpText<"Accept a PCM file that was created with compiler errors">;
 def dump_deserialized_pch_decls : Flag<["-"], "dump-deserialized-decls">,
   HelpText<"Dump declarations that are deserialized from PCH, for testing">;
 def error_on_deserialized_pch_decl : Separate<["-"], "error-on-deserialized-decl">,

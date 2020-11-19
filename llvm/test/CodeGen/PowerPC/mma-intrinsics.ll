@@ -16,8 +16,6 @@ define void @ass_acc(<512 x i1>* %ptr, <16 x i8> %vc) {
 ; CHECK-NEXT:    xxlor vs1, v3, v3
 ; CHECK-NEXT:    xxlor vs2, v2, v2
 ; CHECK-NEXT:    xxlor vs3, v3, v3
-; CHECK-NEXT:    xxmtacc acc0
-; CHECK-NEXT:    xxmfacc acc0
 ; CHECK-NEXT:    stxv vs0, 48(r3)
 ; CHECK-NEXT:    stxv vs1, 32(r3)
 ; CHECK-NEXT:    stxv vs2, 16(r3)
@@ -31,8 +29,6 @@ define void @ass_acc(<512 x i1>* %ptr, <16 x i8> %vc) {
 ; CHECK-BE-NEXT:    xxlor vs1, v3, v3
 ; CHECK-BE-NEXT:    xxlor vs2, v2, v2
 ; CHECK-BE-NEXT:    xxlor vs3, v3, v3
-; CHECK-BE-NEXT:    xxmtacc acc0
-; CHECK-BE-NEXT:    xxmfacc acc0
 ; CHECK-BE-NEXT:    stxv vs1, 16(r3)
 ; CHECK-BE-NEXT:    stxv vs0, 0(r3)
 ; CHECK-BE-NEXT:    stxv vs3, 48(r3)
@@ -77,8 +73,6 @@ define void @int_xxmtacc(<512 x i1>* %ptr, <16 x i8> %vc) {
 ; CHECK-NEXT:    xxlor vs2, v2, v2
 ; CHECK-NEXT:    xxlor vs3, v3, v3
 ; CHECK-NEXT:    xxmtacc acc0
-; CHECK-NEXT:    xxmtacc acc0
-; CHECK-NEXT:    xxmfacc acc0
 ; CHECK-NEXT:    stxv vs0, 48(r3)
 ; CHECK-NEXT:    stxv vs1, 32(r3)
 ; CHECK-NEXT:    stxv vs2, 16(r3)
@@ -93,8 +87,6 @@ define void @int_xxmtacc(<512 x i1>* %ptr, <16 x i8> %vc) {
 ; CHECK-BE-NEXT:    xxlor vs2, v2, v2
 ; CHECK-BE-NEXT:    xxlor vs3, v3, v3
 ; CHECK-BE-NEXT:    xxmtacc acc0
-; CHECK-BE-NEXT:    xxmtacc acc0
-; CHECK-BE-NEXT:    xxmfacc acc0
 ; CHECK-BE-NEXT:    stxv vs1, 16(r3)
 ; CHECK-BE-NEXT:    stxv vs0, 0(r3)
 ; CHECK-BE-NEXT:    stxv vs3, 48(r3)
@@ -119,9 +111,6 @@ define void @int_xxmfacc(<512 x i1>* %ptr, <16 x i8> %vc) {
 ; CHECK-NEXT:    xxlor vs1, v3, v3
 ; CHECK-NEXT:    xxlor vs2, v2, v2
 ; CHECK-NEXT:    xxlor vs3, v3, v3
-; CHECK-NEXT:    xxmtacc acc0
-; CHECK-NEXT:    xxmfacc acc0
-; CHECK-NEXT:    xxmfacc acc0
 ; CHECK-NEXT:    stxv vs0, 48(r3)
 ; CHECK-NEXT:    stxv vs1, 32(r3)
 ; CHECK-NEXT:    stxv vs2, 16(r3)
@@ -135,9 +124,6 @@ define void @int_xxmfacc(<512 x i1>* %ptr, <16 x i8> %vc) {
 ; CHECK-BE-NEXT:    xxlor vs1, v3, v3
 ; CHECK-BE-NEXT:    xxlor vs2, v2, v2
 ; CHECK-BE-NEXT:    xxlor vs3, v3, v3
-; CHECK-BE-NEXT:    xxmtacc acc0
-; CHECK-BE-NEXT:    xxmfacc acc0
-; CHECK-BE-NEXT:    xxmfacc acc0
 ; CHECK-BE-NEXT:    stxv vs1, 16(r3)
 ; CHECK-BE-NEXT:    stxv vs0, 0(r3)
 ; CHECK-BE-NEXT:    stxv vs3, 48(r3)
@@ -262,8 +248,6 @@ define void @testBranch(<512 x i1>* %ptr, <16 x i8> %vc, i32 %val) {
 ; CHECK-NEXT:    xvi4ger8pp acc0, v2, v2
 ; CHECK-NEXT:  .LBB7_3: # %if.end
 ; CHECK-NEXT:    xxmfacc acc0
-; CHECK-NEXT:    xxmtacc acc0
-; CHECK-NEXT:    xxmfacc acc0
 ; CHECK-NEXT:    stxv vs0, 48(r3)
 ; CHECK-NEXT:    stxv vs1, 32(r3)
 ; CHECK-NEXT:    stxv vs2, 16(r3)
@@ -285,8 +269,6 @@ define void @testBranch(<512 x i1>* %ptr, <16 x i8> %vc, i32 %val) {
 ; CHECK-BE-NEXT:    xxmtacc acc0
 ; CHECK-BE-NEXT:    xvi4ger8pp acc0, v2, v2
 ; CHECK-BE-NEXT:  .LBB7_3: # %if.end
-; CHECK-BE-NEXT:    xxmfacc acc0
-; CHECK-BE-NEXT:    xxmtacc acc0
 ; CHECK-BE-NEXT:    xxmfacc acc0
 ; CHECK-BE-NEXT:    stxv vs1, 16(r3)
 ; CHECK-BE-NEXT:    stxv vs0, 0(r3)
@@ -637,8 +619,6 @@ define void @testRedundantPrimeUnprime(<512 x i1>* %dst, <16 x i8> %vc) nounwind
 ; CHECK-NEXT:    lxvp vsp0, r1(r3)
 ; CHECK-NEXT:    li r3, 32
 ; CHECK-NEXT:    lxvp vsp2, r1(r3)
-; CHECK-NEXT:    xxmtacc acc0
-; CHECK-NEXT:    xxmfacc acc0
 ; CHECK-NEXT:    stxv vs0, 112(r30)
 ; CHECK-NEXT:    stxv vs1, 96(r30)
 ; CHECK-NEXT:    stxv vs2, 80(r30)
@@ -675,8 +655,6 @@ define void @testRedundantPrimeUnprime(<512 x i1>* %dst, <16 x i8> %vc) nounwind
 ; CHECK-BE-NEXT:    lxvp vsp0, r1(r3)
 ; CHECK-BE-NEXT:    li r3, 144
 ; CHECK-BE-NEXT:    lxvp vsp2, r1(r3)
-; CHECK-BE-NEXT:    xxmtacc acc0
-; CHECK-BE-NEXT:    xxmfacc acc0
 ; CHECK-BE-NEXT:    stxv vs3, 112(r30)
 ; CHECK-BE-NEXT:    stxv vs2, 96(r30)
 ; CHECK-BE-NEXT:    stxv vs1, 80(r30)
@@ -698,3 +676,315 @@ entry:
 
 declare <512 x i1> @llvm.ppc.mma.pmxvf64gernn(<512 x i1>, <256 x i1>, <16 x i8>, i32, i32)
 declare <512 x i1> @llvm.ppc.mma.xvf64gernp(<512 x i1>, <256 x i1>, <16 x i8>)
+
+; Function Attrs: nounwind
+define void @test_ldst_1(<256 x i1>* %vpp, <256 x i1>* %vp2) {
+; CHECK-LABEL: test_ldst_1:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lxvp vsp0, 0(r3)
+; CHECK-NEXT:    stxvp vsp0, 0(r4)
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_1:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    lxvp vsp0, 0(r3)
+; CHECK-BE-NEXT:    stxvp vsp0, 0(r4)
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast <256 x i1>* %vpp to i8*
+  %1 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %0)
+  %2 = bitcast <256 x i1>* %vp2 to i8*
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %1, i8* %2)
+  ret void
+}
+
+; Function Attrs: argmemonly nounwind readonly
+declare <256 x i1> @llvm.ppc.mma.lxvp(i8*)
+
+; Function Attrs: argmemonly nounwind writeonly
+declare void @llvm.ppc.mma.stxvp(<256 x i1>, i8*)
+
+; Function Attrs: nounwind
+define void @test_ldst_2(<256 x i1>* %vpp, i64 %offset, <256 x i1>* %vp2)  {
+; CHECK-LABEL: test_ldst_2:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lxvpx vsp0, r3, r4
+; CHECK-NEXT:    stxvpx vsp0, r5, r4
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_2:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    lxvpx vsp0, r3, r4
+; CHECK-BE-NEXT:    stxvpx vsp0, r5, r4
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast <256 x i1>* %vpp to i8*
+  %1 = getelementptr i8, i8* %0, i64 %offset
+  %2 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %1)
+  %3 = bitcast <256 x i1>* %vp2 to i8*
+  %4 = getelementptr i8, i8* %3, i64 %offset
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %2, i8* %4)
+  ret void
+}
+
+; Function Attrs: nounwind
+define void @test_ldst_3(<256 x i1>* %vpp, <256 x i1>* %vp2)  {
+; CHECK-LABEL: test_ldst_3:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    li r5, 18
+; CHECK-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_3:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    li r5, 18
+; CHECK-BE-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-BE-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast <256 x i1>* %vpp to i8*
+  %1 = getelementptr i8, i8* %0, i64 18
+  %2 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %1)
+  %3 = bitcast <256 x i1>* %vp2 to i8*
+  %4 = getelementptr i8, i8* %3, i64 18
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %2, i8* %4)
+  ret void
+}
+
+; Function Attrs: nounwind
+define void @test_ldst_4(<256 x i1>* %vpp, <256 x i1>* %vp2)  {
+; CHECK-LABEL: test_ldst_4:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    li r5, 1
+; CHECK-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_4:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    li r5, 1
+; CHECK-BE-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-BE-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast <256 x i1>* %vpp to i8*
+  %1 = getelementptr i8, i8* %0, i64 1
+  %2 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %1)
+  %3 = bitcast <256 x i1>* %vp2 to i8*
+  %4 = getelementptr i8, i8* %3, i64 1
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %2, i8* %4)
+  ret void
+}
+
+; Function Attrs: nounwind
+define void @test_ldst_5(<256 x i1>* %vpp, <256 x i1>* %vp2)  {
+; CHECK-LABEL: test_ldst_5:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    li r5, 42
+; CHECK-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_5:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    li r5, 42
+; CHECK-BE-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-BE-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast <256 x i1>* %vpp to i8*
+  %1 = getelementptr i8, i8* %0, i64 42
+  %2 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %1)
+  %3 = bitcast <256 x i1>* %vp2 to i8*
+  %4 = getelementptr i8, i8* %3, i64 42
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %2, i8* %4)
+  ret void
+}
+
+; Function Attrs: nounwind
+define void @test_ldst_6(<256 x i1>* %vpp, <256 x i1>* %vp2)  {
+; CHECK-LABEL: test_ldst_6:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lxvp vsp0, 4096(r3)
+; CHECK-NEXT:    stxvp vsp0, 4096(r4)
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_6:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    lxvp vsp0, 4096(r3)
+; CHECK-BE-NEXT:    stxvp vsp0, 4096(r4)
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = getelementptr <256 x i1>, <256 x i1>* %vpp, i64 128
+  %1 = bitcast <256 x i1>* %0 to i8*
+  %2 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %1)
+  %3 = getelementptr <256 x i1>, <256 x i1>* %vp2, i64 128
+  %4 = bitcast <256 x i1>* %3 to i8*
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %2, i8* %4)
+  ret void
+}
+
+; Function Attrs: nounwind
+define void @test_ldst_7(<256 x i1>* %vpp, <256 x i1>* %vp2)  {
+; FIXME: A prefixed load (plxvp) is expected here as the offset in this
+; test case is a constant that fits within 34-bits.
+; CHECK-LABEL: test_ldst_7:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    li r5, 0
+; CHECK-NEXT:    ori r5, r5, 32799
+; CHECK-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_7:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    li r5, 0
+; CHECK-BE-NEXT:    ori r5, r5, 32799
+; CHECK-BE-NEXT:    lxvpx vsp0, r3, r5
+; CHECK-BE-NEXT:    stxvpx vsp0, r4, r5
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast <256 x i1>* %vpp to i8*
+  %1 = getelementptr i8, i8* %0, i64 32799
+  %2 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %1)
+  %3 = bitcast <256 x i1>* %vp2 to i8*
+  %4 = getelementptr i8, i8* %3, i64 32799
+  tail call void @llvm.ppc.mma.stxvp(<256 x i1> %2, i8* %4)
+  ret void
+}
+
+; Function Attrs: nofree nounwind
+define void @test_ldst_8(i8* nocapture readonly %vqp, <256 x i1>* %vpp, <16 x i8> %vc, i8* nocapture %resp)  {
+; CHECK-LABEL: test_ldst_8:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lxv vs1, 32(r3)
+; CHECK-NEXT:    lxv vs0, 48(r3)
+; CHECK-NEXT:    lxv vs3, 0(r3)
+; CHECK-NEXT:    lxv vs2, 16(r3)
+; CHECK-NEXT:    li r3, 8
+; CHECK-NEXT:    lxvpx vsp4, r4, r3
+; CHECK-NEXT:    xxmtacc acc0
+; CHECK-NEXT:    pmxvf64gernn acc0, vsp4, v2, 0, 0
+; CHECK-NEXT:    xxmfacc acc0
+; CHECK-NEXT:    stxv vs0, 48(r7)
+; CHECK-NEXT:    stxv vs1, 32(r7)
+; CHECK-NEXT:    stxv vs2, 16(r7)
+; CHECK-NEXT:    stxv vs3, 0(r7)
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_8:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    lxv vs1, 16(r3)
+; CHECK-BE-NEXT:    lxv vs0, 0(r3)
+; CHECK-BE-NEXT:    lxv vs3, 48(r3)
+; CHECK-BE-NEXT:    lxv vs2, 32(r3)
+; CHECK-BE-NEXT:    li r3, 8
+; CHECK-BE-NEXT:    lxvpx vsp4, r4, r3
+; CHECK-BE-NEXT:    xxmtacc acc0
+; CHECK-BE-NEXT:    pmxvf64gernn acc0, vsp4, v2, 0, 0
+; CHECK-BE-NEXT:    xxmfacc acc0
+; CHECK-BE-NEXT:    stxv vs1, 16(r7)
+; CHECK-BE-NEXT:    stxv vs0, 0(r7)
+; CHECK-BE-NEXT:    stxv vs3, 48(r7)
+; CHECK-BE-NEXT:    stxv vs2, 32(r7)
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast i8* %vqp to <512 x i1>*
+  %1 = load <512 x i1>, <512 x i1>* %0, align 64
+  %2 = bitcast <256 x i1>* %vpp to i8*
+  %3 = getelementptr i8, i8* %2, i64 8
+  %4 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %3)
+  %5 = tail call <512 x i1> @llvm.ppc.mma.pmxvf64gernn(<512 x i1> %1, <256 x i1> %4, <16 x i8> %vc, i32 0, i32 0)
+  %6 = bitcast i8* %resp to <512 x i1>*
+  store <512 x i1> %5, <512 x i1>* %6, align 64
+  ret void
+}
+
+; Function Attrs: nofree nounwind
+define void @test_ldst_9(i8* nocapture readonly %vqp, <256 x i1>* %vpp, <16 x i8> %vc, i8* nocapture %resp)  {
+; CHECK-LABEL: test_ldst_9:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lxv vs1, 32(r3)
+; CHECK-NEXT:    lxv vs0, 48(r3)
+; CHECK-NEXT:    lxv vs3, 0(r3)
+; CHECK-NEXT:    lxv vs2, 16(r3)
+; CHECK-NEXT:    lxvp vsp4, 0(r4)
+; CHECK-NEXT:    xxmtacc acc0
+; CHECK-NEXT:    xvf64gernp acc0, vsp4, v2
+; CHECK-NEXT:    xxmfacc acc0
+; CHECK-NEXT:    stxv vs0, 48(r7)
+; CHECK-NEXT:    stxv vs1, 32(r7)
+; CHECK-NEXT:    stxv vs2, 16(r7)
+; CHECK-NEXT:    stxv vs3, 0(r7)
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_9:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    lxv vs1, 16(r3)
+; CHECK-BE-NEXT:    lxv vs0, 0(r3)
+; CHECK-BE-NEXT:    lxv vs3, 48(r3)
+; CHECK-BE-NEXT:    lxv vs2, 32(r3)
+; CHECK-BE-NEXT:    lxvp vsp4, 0(r4)
+; CHECK-BE-NEXT:    xxmtacc acc0
+; CHECK-BE-NEXT:    xvf64gernp acc0, vsp4, v2
+; CHECK-BE-NEXT:    xxmfacc acc0
+; CHECK-BE-NEXT:    stxv vs1, 16(r7)
+; CHECK-BE-NEXT:    stxv vs0, 0(r7)
+; CHECK-BE-NEXT:    stxv vs3, 48(r7)
+; CHECK-BE-NEXT:    stxv vs2, 32(r7)
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast i8* %vqp to <512 x i1>*
+  %1 = load <512 x i1>, <512 x i1>* %0, align 64
+  %2 = bitcast <256 x i1>* %vpp to i8*
+  %3 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %2)
+  %4 = tail call <512 x i1> @llvm.ppc.mma.xvf64gernp(<512 x i1> %1, <256 x i1> %3, <16 x i8> %vc)
+  %5 = bitcast i8* %resp to <512 x i1>*
+  store <512 x i1> %4, <512 x i1>* %5, align 64
+  ret void
+}
+
+; Function Attrs: nofree nounwind
+define void @test_ldst_10(i8* nocapture readonly %vqp, i64 %offs, <256 x i1>* %vpp, <16 x i8> %vc, i8* nocapture %resp)  {
+; CHECK-LABEL: test_ldst_10:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lxv vs1, 32(r3)
+; CHECK-NEXT:    lxv vs0, 48(r3)
+; CHECK-NEXT:    lxv vs3, 0(r3)
+; CHECK-NEXT:    lxv vs2, 16(r3)
+; CHECK-NEXT:    lxvp vsp4, 0(r5)
+; CHECK-NEXT:    xxmtacc acc0
+; CHECK-NEXT:    xvf64gernp acc0, vsp4, v2
+; CHECK-NEXT:    xxmfacc acc0
+; CHECK-NEXT:    stxv vs0, 48(r9)
+; CHECK-NEXT:    stxv vs1, 32(r9)
+; CHECK-NEXT:    stxv vs2, 16(r9)
+; CHECK-NEXT:    stxv vs3, 0(r9)
+; CHECK-NEXT:    blr
+;
+; CHECK-BE-LABEL: test_ldst_10:
+; CHECK-BE:       # %bb.0: # %entry
+; CHECK-BE-NEXT:    lxv vs1, 16(r3)
+; CHECK-BE-NEXT:    lxv vs0, 0(r3)
+; CHECK-BE-NEXT:    lxv vs3, 48(r3)
+; CHECK-BE-NEXT:    lxv vs2, 32(r3)
+; CHECK-BE-NEXT:    lxvp vsp4, 0(r5)
+; CHECK-BE-NEXT:    xxmtacc acc0
+; CHECK-BE-NEXT:    xvf64gernp acc0, vsp4, v2
+; CHECK-BE-NEXT:    xxmfacc acc0
+; CHECK-BE-NEXT:    stxv vs1, 16(r9)
+; CHECK-BE-NEXT:    stxv vs0, 0(r9)
+; CHECK-BE-NEXT:    stxv vs3, 48(r9)
+; CHECK-BE-NEXT:    stxv vs2, 32(r9)
+; CHECK-BE-NEXT:    blr
+entry:
+  %0 = bitcast i8* %vqp to <512 x i1>*
+  %1 = load <512 x i1>, <512 x i1>* %0, align 64
+  %2 = bitcast <256 x i1>* %vpp to i8*
+  %3 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %2)
+  %4 = tail call <512 x i1> @llvm.ppc.mma.xvf64gernp(<512 x i1> %1, <256 x i1> %3, <16 x i8> %vc)
+  %5 = bitcast i8* %resp to <512 x i1>*
+  store <512 x i1> %4, <512 x i1>* %5, align 64
+  ret void
+}

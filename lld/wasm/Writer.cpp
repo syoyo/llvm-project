@@ -539,6 +539,25 @@ void Writer::populateTargetFeatures() {
   }
 }
 
+static bool shouldImport(Symbol *sym) {
+  // We don't generate imports for data symbols. They however can be imported
+  // as GOT entries.
+  if (isa<DataSymbol>(sym))
+    return false;
+
+  if (config->relocatable ||
+      config->unresolvedSymbols == UnresolvedPolicy::ImportFuncs)
+    return true;
+  if (config->allowUndefinedSymbols.count(sym->getName()) != 0)
+    return true;
+  if (auto *g = dyn_cast<UndefinedGlobal>(sym))
+    return g->importName.hasValue();
+  if (auto *f = dyn_cast<UndefinedFunction>(sym))
+    return f->importName.hasValue();
+
+  return false;
+}
+
 void Writer::calculateImports() {
   for (Symbol *sym : symtab->getSymbols()) {
     if (!sym->isUndefined())
@@ -549,13 +568,10 @@ void Writer::calculateImports() {
       continue;
     if (!sym->isUsedInRegularObj)
       continue;
-    // We don't generate imports for data symbols. They however can be imported
-    // as GOT entries.
-    if (isa<DataSymbol>(sym))
-      continue;
-
-    LLVM_DEBUG(dbgs() << "import: " << sym->getName() << "\n");
-    out.importSec->addImport(sym);
+    if (shouldImport(sym)) {
+      LLVM_DEBUG(dbgs() << "import: " << sym->getName() << "\n");
+      out.importSec->addImport(sym);
+    }
   }
 }
 
@@ -749,15 +765,15 @@ void Writer::assignIndexes() {
 }
 
 static StringRef getOutputDataSegmentName(StringRef name) {
-  // With PIC code we currently only support a single data segment since
-  // we only have a single __memory_base to use as our base address.
-  if (config->isPic)
-    return ".data";
   // We only support one thread-local segment, so we must merge the segments
   // despite --no-merge-data-segments.
   // We also need to merge .tbss into .tdata so they share the same offsets.
   if (name.startswith(".tdata") || name.startswith(".tbss"))
     return ".tdata";
+  // With PIC code we currently only support a single data segment since
+  // we only have a single __memory_base to use as our base address.
+  if (config->isPic)
+    return ".data";
   if (!config->mergeDataSegments)
     return name;
   if (name.startswith(".text."))
@@ -1199,10 +1215,10 @@ void Writer::run() {
 
   if (!config->relocatable) {
     // Create linker synthesized functions
-    if (config->sharedMemory)
-      createInitMemoryFunction();
     if (config->isPic)
       createApplyRelocationsFunction();
+    else if (config->sharedMemory)
+      createInitMemoryFunction();
     createCallCtorsFunction();
 
     // Create export wrappers for commands if needed.
