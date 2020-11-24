@@ -36,6 +36,7 @@ add_unittest(ClangdUnitTests ClangdTests
   Annotations.cpp
   ASTTests.cpp
   BackgroundIndexTests.cpp
+  CallHierarchyTests.cpp
   CanonicalIncludesTests.cpp
   ClangdTests.cpp
   ClangdLSPServerTests.cpp
@@ -74,6 +75,7 @@ add_unittest(ClangdUnitTests ClangdTests
   PathMappingTests.cpp
   PreambleTests.cpp
   PrintASTTests.cpp
+  ProjectAwareIndexTests.cpp
   QualityTests.cpp
   RenameTests.cpp
   RIFFTests.cpp

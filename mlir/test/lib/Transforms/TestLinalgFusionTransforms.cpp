@@ -38,7 +38,8 @@ struct TestLinalgFusionTransforms
 static void fillFusionPatterns(MLIRContext *context,
                                const LinalgDependenceGraph &dependenceGraph,
                                OwningRewritePatternList &patterns) {
-  patterns.insert<LinalgTileAndFusePattern<MatmulOp>>(
+  patterns.insert<LinalgTileAndFusePattern<MatmulOp>,
+                  LinalgTileAndFusePattern<ConvOp>>(
       context, dependenceGraph,
       LinalgTilingOptions()
           .setTileSizes({32, 64, 16})

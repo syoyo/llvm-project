@@ -162,13 +162,24 @@ struct ShapeDimension {
 // guarantees at least one such dimension is found. If multiple candidates exist
 // they must agree by construction (i.e. have the same size) and we just return
 // the first one.
-static ShapeDimension getShapeDefiningLoopRange(LinalgOp op,
-                                                unsigned loopDepth) {
+static ShapeDimension
+getShapeDefiningLoopRange(LinalgOp op, unsigned loopDepth,
+                          bool fromSubViewOpOnly = false) {
   auto maps = op.indexing_maps();
   // Iterate over the inputs and outputs in order.
   // Extract the subranges from the linearized ranges.
   SmallVector<Value, 8> ios(op.getInputsAndOutputBuffers());
   for (auto en : llvm::enumerate(ios)) {
+    // The method `getRangeFromOperandShape` requires using SubViewOp or
+    // SubTensorOps. If the value isnt defined from there continue.
+    // todo: The method should be adapted to get the values from
+    // `ViewInterface`. The interface needs a `getOrCreateRanges` method which
+    // currently returns a `linalg.range`. The fix here is to move this op to
+    // `std` dialect and add the method to `ViewInterface`.
+    if (fromSubViewOpOnly &&
+        !isa_and_nonnull<SubViewOp, SubTensorOp>(en.value().getDefiningOp()))
+      continue;
+
     unsigned idx = en.index();
     auto map = maps[idx].cast<AffineMapAttr>().getValue();
     LLVM_DEBUG(llvm::dbgs()
@@ -782,6 +793,12 @@ FusableOpDependencesTy mlir::linalg::findAllFusableDependences(
   return fusableDependences;
 }
 
+static bool isZero(Value v) {
+  if (auto cst = v.getDefiningOp<ConstantIndexOp>())
+    return cst.getValue() == 0;
+  return false;
+}
+
 /// Tile the fused loops in the root operation, by setting the tile sizes for
 /// all other loops to zero (those will be tiled later).
 static Optional<TiledLinalgOp> tileRootOperation(
@@ -810,7 +827,7 @@ fuseOperations(OpBuilder &builder, LinalgOp tiledOp,
   builder.setInsertionPoint(tiledOp);
   DenseMap<unsigned, Range> fusedLoopsAndRanges;
   for (unsigned loop : fusedLoops) {
-    ShapeDimension shapeDim = getShapeDefiningLoopRange(tiledOp, loop);
+    ShapeDimension shapeDim = getShapeDefiningLoopRange(tiledOp, loop, true);
     fusedLoopsAndRanges[loop] = getRangeFromOperandShape(
         builder, tiledOp.getLoc(), shapeDim.shape, shapeDim.dimension);
   }

@@ -33,6 +33,8 @@ static constexpr const char kAsyncFnPrefix[] = "async_execute_fn";
 // Async Runtime C API declaration.
 //===----------------------------------------------------------------------===//
 
+static constexpr const char *kAddRef = "mlirAsyncRuntimeAddRef";
+static constexpr const char *kDropRef = "mlirAsyncRuntimeDropRef";
 static constexpr const char *kCreateToken = "mlirAsyncRuntimeCreateToken";
 static constexpr const char *kCreateGroup = "mlirAsyncRuntimeCreateGroup";
 static constexpr const char *kEmplaceToken = "mlirAsyncRuntimeEmplaceToken";
@@ -49,6 +51,12 @@ static constexpr const char *kAwaitAllAndExecute =
 namespace {
 // Async Runtime API function types.
 struct AsyncAPI {
+  static FunctionType addOrDropRefFunctionType(MLIRContext *ctx) {
+    auto ref = LLVM::LLVMType::getInt8PtrTy(ctx);
+    auto count = IntegerType::get(32, ctx);
+    return FunctionType::get({ref, count}, {}, ctx);
+  }
+
   static FunctionType createTokenFunctionType(MLIRContext *ctx) {
     return FunctionType::get({}, {TokenType::get(ctx)}, ctx);
   }
@@ -113,6 +121,8 @@ static void addAsyncRuntimeApiDeclarations(ModuleOp module) {
   };
 
   MLIRContext *ctx = module.getContext();
+  addFuncDecl(kAddRef, AsyncAPI::addOrDropRefFunctionType(ctx));
+  addFuncDecl(kDropRef, AsyncAPI::addOrDropRefFunctionType(ctx));
   addFuncDecl(kCreateToken, AsyncAPI::createTokenFunctionType(ctx));
   addFuncDecl(kCreateGroup, AsyncAPI::createGroupFunctionType(ctx));
   addFuncDecl(kEmplaceToken, AsyncAPI::emplaceTokenFunctionType(ctx));
@@ -121,7 +131,8 @@ static void addAsyncRuntimeApiDeclarations(ModuleOp module) {
   addFuncDecl(kExecute, AsyncAPI::executeFunctionType(ctx));
   addFuncDecl(kAddTokenToGroup, AsyncAPI::addTokenToGroupFunctionType(ctx));
   addFuncDecl(kAwaitAndExecute, AsyncAPI::awaitAndExecuteFunctionType(ctx));
-  addFuncDecl(kAwaitAllAndExecute, AsyncAPI::awaitAllAndExecuteFunctionType(ctx));
+  addFuncDecl(kAwaitAllAndExecute,
+              AsyncAPI::awaitAllAndExecuteFunctionType(ctx));
 }
 
 //===----------------------------------------------------------------------===//
@@ -581,11 +592,60 @@ public:
 
     CallOp call = cast<CallOp>(op);
     rewriter.replaceOpWithNewOp<CallOp>(op, resultTypes, call.callee(),
-                                        call.getOperands());
+                                        operands);
 
     return success();
   }
 };
+} // namespace
+
+//===----------------------------------------------------------------------===//
+// Async reference counting ops lowering (`async.add_ref` and `async.drop_ref`
+// to the corresponding API calls).
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+template <typename RefCountingOp>
+class RefCountingOpLowering : public ConversionPattern {
+public:
+  explicit RefCountingOpLowering(MLIRContext *ctx, StringRef apiFunctionName)
+      : ConversionPattern(RefCountingOp::getOperationName(), 1, ctx),
+        apiFunctionName(apiFunctionName) {}
+
+  LogicalResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    RefCountingOp refCountingOp = cast<RefCountingOp>(op);
+
+    auto count = rewriter.create<ConstantOp>(
+        op->getLoc(), rewriter.getI32Type(),
+        rewriter.getI32IntegerAttr(refCountingOp.count()));
+
+    rewriter.replaceOpWithNewOp<CallOp>(op, TypeRange(), apiFunctionName,
+                                        ValueRange({operands[0], count}));
+
+    return success();
+  }
+
+private:
+  StringRef apiFunctionName;
+};
+
+// async.drop_ref op lowering to mlirAsyncRuntimeDropRef function call.
+class AddRefOpLowering : public RefCountingOpLowering<AddRefOp> {
+public:
+  explicit AddRefOpLowering(MLIRContext *ctx)
+      : RefCountingOpLowering(ctx, kAddRef) {}
+};
+
+// async.create_group op lowering to mlirAsyncRuntimeCreateGroup function call.
+class DropRefOpLowering : public RefCountingOpLowering<DropRefOp> {
+public:
+  explicit DropRefOpLowering(MLIRContext *ctx)
+      : RefCountingOpLowering(ctx, kDropRef) {}
+};
+
 } // namespace
 
 //===----------------------------------------------------------------------===//
@@ -673,7 +733,7 @@ public:
     // async API await function call.
     if (!isInCoroutine)
       rewriter.create<CallOp>(loc, TypeRange(), blockingAwaitFuncName,
-                              ValueRange(op->getOperand(0)));
+                              ValueRange(operands[0]));
 
     // Inside the coroutine we convert await operation into coroutine suspension
     // point, and resume execution asynchronously.
@@ -695,8 +755,8 @@ public:
 
       // Call async runtime API to resume a coroutine in the managed thread when
       // the async await argument becomes ready.
-      SmallVector<Value, 3> awaitAndExecuteArgs = {
-          await.getOperand(), coro.coroHandle, resumePtr.res()};
+      SmallVector<Value, 3> awaitAndExecuteArgs = {operands[0], coro.coroHandle,
+                                                   resumePtr.res()};
       builder.create<CallOp>(loc, TypeRange(), coroAwaitFuncName,
                              awaitAndExecuteArgs);
 
@@ -794,10 +854,12 @@ void ConvertAsyncToLLVMPass::runOnOperation() {
 
   populateFuncOpTypeConversionPattern(patterns, ctx, converter);
   patterns.insert<CallOpOpConversion>(ctx);
+  patterns.insert<AddRefOpLowering, DropRefOpLowering>(ctx);
   patterns.insert<CreateGroupOpLowering, AddToGroupOpLowering>(ctx);
   patterns.insert<AwaitOpLowering, AwaitAllOpLowering>(ctx, outlinedFunctions);
 
   ConversionTarget target(*ctx);
+  target.addLegalOp<ConstantOp>();
   target.addLegalDialect<LLVM::LLVMDialect>();
   target.addIllegalDialect<AsyncDialect>();
   target.addDynamicallyLegalOp<FuncOp>(
