@@ -121,6 +121,11 @@ cl::desc("don't always align innermost loop to 32 bytes on ppc"), cl::Hidden);
 static cl::opt<bool> UseAbsoluteJumpTables("ppc-use-absolute-jumptables",
 cl::desc("use absolute jump tables on ppc"), cl::Hidden);
 
+// TODO - Remove this option if soft fp128 has been fully supported .
+static cl::opt<bool>
+    EnableSoftFP128("enable-soft-fp128",
+                    cl::desc("temp option to enable soft fp128"), cl::Hidden);
+
 STATISTIC(NumTailCalls, "Number of tail calls");
 STATISTIC(NumSiblingCalls, "Number of sibling calls");
 STATISTIC(ShufflesHandledWithVPERM, "Number of shuffles lowered to a VPERM");
@@ -1161,6 +1166,32 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
       setOperationAction(ISD::BSWAP, MVT::v4i32, Legal);
       setOperationAction(ISD::BSWAP, MVT::v2i64, Legal);
       setOperationAction(ISD::BSWAP, MVT::v1i128, Legal);
+    } else if (Subtarget.hasAltivec() && EnableSoftFP128) {
+      addRegisterClass(MVT::f128, &PPC::VRRCRegClass);
+
+      for (MVT FPT : MVT::fp_valuetypes())
+        setLoadExtAction(ISD::EXTLOAD, MVT::f128, FPT, Expand);
+
+      setOperationAction(ISD::LOAD, MVT::f128, Promote);
+      setOperationAction(ISD::STORE, MVT::f128, Promote);
+
+      AddPromotedToType(ISD::LOAD, MVT::f128, MVT::v4i32);
+      AddPromotedToType(ISD::STORE, MVT::f128, MVT::v4i32);
+
+      setOperationAction(ISD::FADD, MVT::f128, Expand);
+      setOperationAction(ISD::FSUB, MVT::f128, Expand);
+      setOperationAction(ISD::FMUL, MVT::f128, Expand);
+      setOperationAction(ISD::FDIV, MVT::f128, Expand);
+      setOperationAction(ISD::FNEG, MVT::f128, Expand);
+      setOperationAction(ISD::FABS, MVT::f128, Expand);
+      setOperationAction(ISD::FSIN, MVT::f128, Expand);
+      setOperationAction(ISD::FCOS, MVT::f128, Expand);
+      setOperationAction(ISD::FPOW, MVT::f128, Expand);
+      setOperationAction(ISD::FPOWI, MVT::f128, Expand);
+      setOperationAction(ISD::FREM, MVT::f128, Expand);
+      setOperationAction(ISD::FSQRT, MVT::f128, Expand);
+      setOperationAction(ISD::FMA, MVT::f128, Expand);
+      setOperationAction(ISD::FCOPYSIGN, MVT::f128, Expand);
     }
 
     if (Subtarget.hasP9Altivec()) {
@@ -6968,6 +6999,16 @@ static bool CC_AIX(unsigned ValNo, MVT ValVT, MVT LocVT,
   const Align PtrAlign = IsPPC64 ? Align(8) : Align(4);
   const MVT RegVT = IsPPC64 ? MVT::i64 : MVT::i32;
 
+  if (ValVT.isVector() && !State.getMachineFunction()
+                               .getTarget()
+                               .Options.EnableAIXExtendedAltivecABI)
+    report_fatal_error("the default Altivec AIX ABI is not yet supported");
+
+  if (ValVT.isVector() && State.getMachineFunction()
+                              .getTarget()
+                              .Options.EnableAIXExtendedAltivecABI)
+    report_fatal_error("the extended Altivec AIX ABI is not yet supported");
+
   assert((!ValVT.isInteger() ||
           (ValVT.getFixedSizeInBits() <= RegVT.getFixedSizeInBits())) &&
          "Integer argument exceeds register size: should have been legalized");
@@ -8411,6 +8452,13 @@ bool PPCTargetLowering::canReuseLoadAddress(SDValue Op, EVT MemVT,
       LD->isNonTemporal())
     return false;
   if (LD->getMemoryVT() != MemVT)
+    return false;
+
+  // If the result of the load is an illegal type, then we can't build a
+  // valid chain for reuse since the legalised loads and token factor node that
+  // ties the legalised loads together uses a different output chain then the
+  // illegal load.
+  if (!isTypeLegal(LD->getValueType(0)))
     return false;
 
   RLI.Ptr = LD->getBasePtr();

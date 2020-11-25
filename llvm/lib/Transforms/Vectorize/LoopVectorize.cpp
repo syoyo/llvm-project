@@ -2728,7 +2728,7 @@ Value *InnerLoopVectorizer::getOrCreateTripCount(Loop *L) {
   // Find the loop boundaries.
   ScalarEvolution *SE = PSE.getSE();
   const SCEV *BackedgeTakenCount = PSE.getBackedgeTakenCount();
-  assert(BackedgeTakenCount != SE->getCouldNotCompute() &&
+  assert(!isa<SCEVCouldNotCompute>(BackedgeTakenCount) &&
          "Invalid loop count");
 
   Type *IdxTy = Legal->getWidestInductionType();
@@ -5119,7 +5119,8 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
         addToWorklistIfAllowed(&I);
 
       // True if all users of Ptr are memory accesses that have Ptr as their
-      // pointer operand.
+      // pointer operand.  Since loops are assumed to be in LCSSA form, this
+      // disallows uses outside the loop as well.
       auto UsersAreMemAccesses =
           llvm::all_of(Ptr->users(), [&](User *U) -> bool {
             return getLoadStorePointerOperand(U) == Ptr;
@@ -7132,6 +7133,12 @@ void LoopVectorizationPlanner::collectTriviallyDeadInstructions(
   for (auto &Induction : Legal->getInductionVars()) {
     PHINode *Ind = Induction.first;
     auto *IndUpdate = cast<Instruction>(Ind->getIncomingValueForBlock(Latch));
+
+    // If the tail is to be folded by masking, the primary induction variable,
+    // if exists, isn't dead: it will be used for masking. Don't kill it.
+    if (CM.foldTailByMasking() && IndUpdate == Legal->getPrimaryInduction())
+      continue;
+
     if (llvm::all_of(IndUpdate->users(), [&](User *U) -> bool {
           return U == Ind || DeadInstructions.count(cast<Instruction>(U));
         }))
@@ -8267,7 +8274,7 @@ static bool processLoopInVPlanNativePath(
     OptimizationRemarkEmitter *ORE, BlockFrequencyInfo *BFI,
     ProfileSummaryInfo *PSI, LoopVectorizeHints &Hints) {
 
-  if (PSE.getBackedgeTakenCount() == PSE.getSE()->getCouldNotCompute()) {
+  if (isa<SCEVCouldNotCompute>(PSE.getBackedgeTakenCount())) {
     LLVM_DEBUG(dbgs() << "LV: cannot compute the outer-loop trip count\n");
     return false;
   }

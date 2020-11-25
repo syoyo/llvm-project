@@ -481,6 +481,7 @@ static bool initTargetOptions(DiagnosticsEngine &Diags,
     Options.AllowFPOpFusion = llvm::FPOpFusion::Standard;
     break;
   case LangOptions::FPM_On:
+  case LangOptions::FPM_FastHonorPragmas:
     Options.AllowFPOpFusion = llvm::FPOpFusion::Standard;
     break;
   case LangOptions::FPM_Fast:
@@ -553,6 +554,7 @@ static bool initTargetOptions(DiagnosticsEngine &Diags,
   Options.EmitAddrsig = CodeGenOpts.Addrsig;
   Options.ForceDwarfFrameSection = CodeGenOpts.ForceDwarfFrameSection;
   Options.EmitCallSiteInfo = CodeGenOpts.EmitCallSiteInfo;
+  Options.EnableAIXExtendedAltivecABI = CodeGenOpts.EnableAIXExtendedAltivecABI;
   Options.ValueTrackingVariableLocations =
       CodeGenOpts.ValueTrackingVariableLocations;
   Options.XRayOmitFunctionIndex = CodeGenOpts.XRayOmitFunctionIndex;
