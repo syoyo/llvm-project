@@ -224,9 +224,9 @@ void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, bool WritePtr,
     }
     // Add the size of the pointed element to ScEnd.
     auto &DL = Lp->getHeader()->getModule()->getDataLayout();
-    unsigned EltSize =
-        DL.getTypeStoreSizeInBits(Ptr->getType()->getPointerElementType()) / 8;
-    const SCEV *EltSizeSCEV = SE->getConstant(ScEnd->getType(), EltSize);
+    Type *IdxTy = DL.getIndexType(Ptr->getType());
+    const SCEV *EltSizeSCEV =
+        SE->getStoreSizeOfExpr(IdxTy, Ptr->getType()->getPointerElementType());
     ScEnd = SE->getAddExpr(ScEnd, EltSizeSCEV);
   }
 
@@ -1654,7 +1654,7 @@ MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
   LLVM_DEBUG(dbgs() << "LAA: Positive distance " << Val.getSExtValue()
                     << " with max VF = " << MaxVF << '\n');
   uint64_t MaxVFInBits = MaxVF * TypeByteSize * 8;
-  MaxSafeRegisterWidth = std::min(MaxSafeRegisterWidth, MaxVFInBits);
+  MaxSafeVectorWidthInBits = std::min(MaxSafeVectorWidthInBits, MaxVFInBits);
   return Dependence::BackwardVectorizable;
 }
 

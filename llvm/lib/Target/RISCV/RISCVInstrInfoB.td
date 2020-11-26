@@ -17,8 +17,10 @@
 // Operand and SDNode transformation definitions.
 //===----------------------------------------------------------------------===//
 
-def riscv_rolw      : SDNode<"RISCVISD::ROLW", SDTIntShiftOp>;
-def riscv_rorw      : SDNode<"RISCVISD::RORW", SDTIntShiftOp>;
+def riscv_rolw : SDNode<"RISCVISD::ROLW", SDTIntShiftOp>;
+def riscv_rorw : SDNode<"RISCVISD::RORW", SDTIntShiftOp>;
+def riscv_fslw : SDNode<"RISCVISD::FSLW", SDTIntShiftDOp>;
+def riscv_fsrw : SDNode<"RISCVISD::FSRW", SDTIntShiftDOp>;
 
 def UImmLog2XLenHalfAsmOperand : AsmOperandClass {
   let Name = "UImmLog2XLenHalf";
@@ -787,17 +789,9 @@ def : Pat<(sext_inreg GPR:$rs1, i16), (SEXTH GPR:$rs1)>;
 
 let Predicates = [HasStdExtZbb] in {
 def : Pat<(smin GPR:$rs1, GPR:$rs2), (MIN  GPR:$rs1, GPR:$rs2)>;
-def : Pat<(riscv_selectcc GPR:$rs1, GPR:$rs2, (XLenVT 20), GPR:$rs1, GPR:$rs2),
-          (MIN  GPR:$rs1, GPR:$rs2)>;
 def : Pat<(smax GPR:$rs1, GPR:$rs2), (MAX  GPR:$rs1, GPR:$rs2)>;
-def : Pat<(riscv_selectcc GPR:$rs2, GPR:$rs1, (XLenVT 20), GPR:$rs1, GPR:$rs2),
-          (MAX  GPR:$rs1, GPR:$rs2)>;
 def : Pat<(umin GPR:$rs1, GPR:$rs2), (MINU GPR:$rs1, GPR:$rs2)>;
-def : Pat<(riscv_selectcc GPR:$rs1, GPR:$rs2, (XLenVT 12), GPR:$rs1, GPR:$rs2),
-          (MINU  GPR:$rs1, GPR:$rs2)>;
 def : Pat<(umax GPR:$rs1, GPR:$rs2), (MAXU GPR:$rs1, GPR:$rs2)>;
-def : Pat<(riscv_selectcc GPR:$rs2, GPR:$rs1, (XLenVT 12), GPR:$rs1, GPR:$rs2),
-          (MAXU  GPR:$rs1, GPR:$rs2)>;
 } // Predicates = [HasStdExtZbb]
 
 let Predicates = [HasStdExtZbbOrZbp, IsRV32] in
@@ -920,21 +914,13 @@ def : Pat<(riscv_gorciw GPR:$rs1, timm:$shamt), (GORCIW GPR:$rs1, timm:$shamt)>;
 } // Predicates = [HasStdExtZbp, IsRV64]
 
 let Predicates = [HasStdExtZbt, IsRV64] in {
-def : Pat<(sext_inreg (fshl GPR:$rs1, (shl GPR:$rs3, (i64 32)),
-                            (and GPR:$rs2, (i64 31))),
-                      i32),
-          (FSLW GPR:$rs1, (ANDI GPR:$rs2, 31), GPR:$rs3)>;
-def : Pat<(sext_inreg (fshr GPR:$rs3, (shl GPR:$rs1, (i64 32)),
-                            (or GPR:$rs2, (i64 32))),
-                      i32),
-          (FSRW GPR:$rs1, (ANDI GPR:$rs2, 31), GPR:$rs3)>;
-def : Pat<(sext_inreg (fshr GPR:$rs3, (shl GPR:$rs1, (i64 32)),
-                            uimm6gt32:$shamt),
-                      i32),
-          (FSRIW GPR:$rs1, GPR:$rs3, (ImmSub32 uimm6gt32:$shamt))>;
-def : Pat<(sext_inreg (fshl GPR:$rs3, (shl GPR:$rs1, (i64 32)),
-                            uimm5:$shamt),
-                      i32),
+def : Pat<(riscv_fslw GPR:$rs1, GPR:$rs3, GPR:$rs2),
+          (FSLW GPR:$rs1, GPR:$rs2, GPR:$rs3)>;
+def : Pat<(riscv_fsrw GPR:$rs3, GPR:$rs1, GPR:$rs2),
+          (FSRW GPR:$rs1, GPR:$rs2, GPR:$rs3)>;
+def : Pat<(riscv_fsrw GPR:$rs3, GPR:$rs1, uimm5:$shamt),
+          (FSRIW GPR:$rs1, GPR:$rs3, uimm5:$shamt)>;
+def : Pat<(riscv_fslw GPR:$rs3, GPR:$rs1, uimm5:$shamt),
           (FSRIW GPR:$rs1, GPR:$rs3, (ImmROTL2RW uimm5:$shamt))>;
 } // Predicates = [HasStdExtZbt, IsRV64]
 
