@@ -418,6 +418,9 @@ Constant *Constant::getAggregateElement(unsigned Elt) const {
   if (const auto *CAZ = dyn_cast<ConstantAggregateZero>(this))
     return Elt < CAZ->getNumElements() ? CAZ->getElementValue(Elt) : nullptr;
 
+  if (const auto *PV = dyn_cast<PoisonValue>(this))
+    return Elt < PV->getNumElements() ? PV->getElementValue(Elt) : nullptr;
+
   if (const auto *UV = dyn_cast<UndefValue>(this))
     return Elt < UV->getNumElements() ? UV->getElementValue(Elt) : nullptr;
 
@@ -518,6 +521,9 @@ void llvm::deleteConstant(Constant *C) {
     break;
   case Constant::UndefValueVal:
     delete static_cast<UndefValue *>(C);
+    break;
+  case Constant::PoisonValueVal:
+    delete static_cast<PoisonValue *>(C);
     break;
   case Constant::ConstantExprVal:
     if (isa<UnaryConstantExpr>(C))
@@ -1722,7 +1728,12 @@ UndefValue *UndefValue::get(Type *Ty) {
 /// Remove the constant from the constant table.
 void UndefValue::destroyConstantImpl() {
   // Free the constant and any dangling references to it.
-  getContext().pImpl->UVConstants.erase(getType());
+  if (getValueID() == UndefValueVal) {
+    getContext().pImpl->UVConstants.erase(getType());
+  } else if (getValueID() == PoisonValueVal) {
+    getContext().pImpl->PVConstants.erase(getType());
+  }
+  llvm_unreachable("Not a undef or a poison!");
 }
 
 PoisonValue *PoisonValue::get(Type *Ty) {
@@ -1850,6 +1861,11 @@ Value *DSOLocalEquivalent::handleOperandChangeImpl(Value *From, Value *To) {
     if (NewEquiv)
       return NewEquiv;
   }
+
+  // If the argument is replaced with a null value, just replace this constant
+  // with a null value.
+  if (cast<Constant>(To)->isNullValue())
+    return To;
 
   // The replacement could be a bitcast or an alias to another function. We can
   // replace it with a bitcast to the dso_local_equivalent of that function.
