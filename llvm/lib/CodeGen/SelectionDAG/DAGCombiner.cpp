@@ -9413,9 +9413,9 @@ bool refineUniformBase(SDValue &BasePtr, SDValue &Index, SelectionDAG &DAG) {
 bool refineIndexType(MaskedScatterSDNode *MSC, SDValue &Index, bool Scaled,
                      SelectionDAG &DAG) {
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-  SDValue Op = Index.getOperand(0);
 
   if (Index.getOpcode() == ISD::ZERO_EXTEND) {
+    SDValue Op = Index.getOperand(0);
     MSC->setIndexType(Scaled ? ISD::UNSIGNED_SCALED : ISD::UNSIGNED_UNSCALED);
     if (TLI.shouldRemoveExtendFromGSIndex(Op.getValueType())) {
       Index = Op;
@@ -9424,6 +9424,7 @@ bool refineIndexType(MaskedScatterSDNode *MSC, SDValue &Index, bool Scaled,
   }
 
   if (Index.getOpcode() == ISD::SIGN_EXTEND) {
+    SDValue Op = Index.getOperand(0);
     MSC->setIndexType(Scaled ? ISD::SIGNED_SCALED : ISD::SIGNED_UNSCALED);
     if (TLI.shouldRemoveExtendFromGSIndex(Op.getValueType())) {
       Index = Op;
@@ -10660,6 +10661,19 @@ SDValue DAGCombiner::visitSIGN_EXTEND(SDNode *N) {
       N0.getOperand(0).getOpcode() == ISD::ZERO_EXTEND &&
       TLI.isOperationLegalOrCustom(ISD::ADD, VT)) {
     SDValue Zext = DAG.getZExtOrTrunc(N0.getOperand(0).getOperand(0), DL, VT);
+    return DAG.getNode(ISD::ADD, DL, VT, Zext, DAG.getAllOnesConstant(DL, VT));
+  }
+
+  // fold sext (not i1 X) -> add (zext i1 X), -1
+  // TODO: This could be extended to handle bool vectors.
+  if (N0.getValueType() == MVT::i1 && isBitwiseNot(N0) && N0.hasOneUse() &&
+      (!LegalOperations || (TLI.isOperationLegal(ISD::ZERO_EXTEND, VT) &&
+                            TLI.isOperationLegal(ISD::ADD, VT)))) {
+    // If we can eliminate the 'not', the sext form should be better
+    if (SDValue NewXor = visitXOR(N0.getNode()))
+      return DAG.getNode(ISD::SIGN_EXTEND, DL, VT, NewXor);
+
+    SDValue Zext = DAG.getNode(ISD::ZERO_EXTEND, DL, VT, N0.getOperand(0));
     return DAG.getNode(ISD::ADD, DL, VT, Zext, DAG.getAllOnesConstant(DL, VT));
   }
 
