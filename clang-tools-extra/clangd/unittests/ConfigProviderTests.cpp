@@ -144,6 +144,7 @@ TEST(ProviderTest, FromAncestorRelativeYAMLFiles) {
   Cfg = P->getConfig(ABCParams, Diags.callback());
   EXPECT_THAT(Diags.Diagnostics,
               ElementsAre(DiagMessage("Unknown CompileFlags key Unknown")));
+  // FIXME: fails on windows: paths have mixed slashes like C:\a/b\c.yaml
   EXPECT_THAT(Diags.Files,
               ElementsAre(testPath("a/foo.yaml"), testPath("a/b/c/foo.yaml")));
   EXPECT_THAT(getAddedArgs(Cfg), ElementsAre("foo", "bar", "baz"));

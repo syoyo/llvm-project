@@ -907,7 +907,7 @@ bool EmitAssemblyHelper::AddEmitPasses(legacy::PassManager &CodeGenPasses,
 
 void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
                                       std::unique_ptr<raw_pwrite_stream> OS) {
-  TimeRegion Region(FrontendTimesIsEnabled ? &CodeGenerationTime : nullptr);
+  TimeRegion Region(CodeGenOpts.TimePasses ? &CodeGenerationTime : nullptr);
 
   setCommandLineOpts(CodeGenOpts);
 
@@ -1064,7 +1064,7 @@ static PassBuilder::OptimizationLevel mapToLevel(const CodeGenOptions &Opts) {
 /// `EmitAssembly` at some point in the future when the default switches.
 void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
     BackendAction Action, std::unique_ptr<raw_pwrite_stream> OS) {
-  TimeRegion Region(FrontendTimesIsEnabled ? &CodeGenerationTime : nullptr);
+  TimeRegion Region(CodeGenOpts.TimePasses ? &CodeGenerationTime : nullptr);
   setCommandLineOpts(CodeGenOpts);
 
   bool RequiresCodeGen = (Action != Backend_EmitNothing &&
@@ -1482,7 +1482,7 @@ static void runThinLTOBackend(
   }
 
   Conf.ProfileRemapping = std::move(ProfileRemapping);
-  Conf.UseNewPM = CGOpts.ExperimentalNewPassManager;
+  Conf.UseNewPM = !CGOpts.LegacyPassManager;
   Conf.DebugPassManager = CGOpts.DebugPassManager;
   Conf.RemarksWithHotness = CGOpts.DiagnosticsWithHotness;
   Conf.RemarksFilename = CGOpts.OptRecordFile;
@@ -1572,7 +1572,7 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
 
   EmitAssemblyHelper AsmHelper(Diags, HeaderOpts, CGOpts, TOpts, LOpts, M);
 
-  if (CGOpts.ExperimentalNewPassManager)
+  if (!CGOpts.LegacyPassManager)
     AsmHelper.EmitAssemblyWithNewPassManager(Action, std::move(OS));
   else
     AsmHelper.EmitAssembly(Action, std::move(OS));

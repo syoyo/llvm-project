@@ -562,6 +562,16 @@ unsigned NameSection::numNamedGlobals() const {
   return numNames;
 }
 
+unsigned NameSection::numNamedDataSegments() const {
+  unsigned numNames = 0;
+
+  for (const OutputSegment *s : segments)
+    if (!s->name.empty() && !s->isBss)
+      ++numNames;
+
+  return numNames;
+}
+
 // Create the custom "name" section containing debug symbol names.
 void NameSection::writeBody() {
   unsigned count = numNamedFunctions();
@@ -615,6 +625,21 @@ void NameSection::writeBody() {
     for (Symbol *s : out.globalSec->internalGotSymbols) {
       writeUleb128(sub.os, s->getGOTIndex(), "global index");
       writeStr(sub.os, toString(*s), "symbol name");
+    }
+
+    sub.writeTo(bodyOutputStream);
+  }
+
+  count = numNamedDataSegments();
+  if (count) {
+    SubSection sub(WASM_NAMES_DATA_SEGMENT);
+    writeUleb128(sub.os, count, "name count");
+
+    for (OutputSegment *s : segments) {
+      if (!s->name.empty() && !s->isBss) {
+        writeUleb128(sub.os, s->index, "global index");
+        writeStr(sub.os, s->name, "segment name");
+      }
     }
 
     sub.writeTo(bodyOutputStream);
