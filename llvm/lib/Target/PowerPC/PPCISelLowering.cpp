@@ -7277,6 +7277,7 @@ SDValue PPCTargetLowering::LowerFormalArguments_AIX(
   SmallVector<CCValAssign, 16> ArgLocs;
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
+  PPCFunctionInfo *FuncInfo = MF.getInfo<PPCFunctionInfo>();
   CCState CCInfo(CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
 
   const EVT PtrVT = getPointerTy(MF.getDataLayout());
@@ -7303,6 +7304,15 @@ SDValue PPCTargetLowering::LowerFormalArguments_AIX(
     // the register.
     if (VA.isMemLoc() && VA.needsCustom())
       continue;
+
+    if (VA.isRegLoc()) {
+      if (VA.getValVT().isScalarInteger())
+        FuncInfo->appendParameterType(PPCFunctionInfo::FixedType);
+      else if (VA.getValVT().isFloatingPoint() && !VA.getValVT().isVector())
+        FuncInfo->appendParameterType(VA.getValVT().SimpleTy == MVT::f32
+                                          ? PPCFunctionInfo::ShortFloatPoint
+                                          : PPCFunctionInfo::LongFloatPoint);
+    }
 
     if (Flags.isByVal() && VA.isMemLoc()) {
       const unsigned Size =
@@ -7367,6 +7377,7 @@ SDValue PPCTargetLowering::LowerFormalArguments_AIX(
 
         const CCValAssign RL = ArgLocs[I++];
         HandleRegLoc(RL.getLocReg(), Offset);
+        FuncInfo->appendParameterType(PPCFunctionInfo::FixedType);
       }
 
       if (Offset != StackSize) {
@@ -7429,7 +7440,6 @@ SDValue PPCTargetLowering::LowerFormalArguments_AIX(
   // aligned stack.
   CallerReservedArea =
       EnsureStackAlignment(Subtarget.getFrameLowering(), CallerReservedArea);
-  PPCFunctionInfo *FuncInfo = MF.getInfo<PPCFunctionInfo>();
   FuncInfo->setMinReservedArea(CallerReservedArea);
 
   if (isVarArg) {
@@ -9387,10 +9397,10 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
       }
     }
 
-    // BUILD_VECTOR nodes that are not constant splats of up to 32-bits can be
-    // lowered to VSX instructions under certain conditions.
+    // In 64BIT mode BUILD_VECTOR nodes that are not constant splats of up to
+    // 32-bits can be lowered to VSX instructions under certain conditions.
     // Without VSX, there is no pattern more efficient than expanding the node.
-    if (Subtarget.hasVSX() &&
+    if (Subtarget.hasVSX() && Subtarget.isPPC64() &&
         haveEfficientBuildVectorPattern(BVN, Subtarget.hasDirectMove(),
                                         Subtarget.hasP8Vector()))
       return Op;
