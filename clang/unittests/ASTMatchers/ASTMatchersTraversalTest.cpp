@@ -1935,6 +1935,18 @@ void bar()
       matches(Code, callExpr(traverse(TK_IgnoreUnlessSpelledInSource,
                                       hasAnyArgument(floatLiteral())))));
 
+  EXPECT_TRUE(matches(
+      R"cpp(
+void takesBool(bool){}
+
+template <typename T>
+void neverInstantiatedTemplate() {
+  takesBool(T{});
+}
+)cpp",
+      traverse(TK_IgnoreUnlessSpelledInSource,
+               callExpr(unless(callExpr(hasDeclaration(functionDecl())))))));
+
   EXPECT_TRUE(
       matches(VarDeclCode, varDecl(traverse(TK_IgnoreUnlessSpelledInSource,
                                             hasType(builtinType())))));
@@ -2567,6 +2579,31 @@ struct CtorInitsNonTrivial : NonTrivial
     auto M = cxxForRangeStmt(hasBody(stmt()));
     EXPECT_TRUE(matches(Code, traverse(TK_AsIs, M)));
     EXPECT_TRUE(matches(Code, traverse(TK_IgnoreUnlessSpelledInSource, M)));
+  }
+  {
+    auto M = binaryOperator(hasOperatorName("!="));
+    EXPECT_TRUE(matches(Code, traverse(TK_AsIs, M)));
+    EXPECT_FALSE(matches(Code, traverse(TK_IgnoreUnlessSpelledInSource, M)));
+  }
+  {
+    auto M = unaryOperator(hasOperatorName("++"));
+    EXPECT_TRUE(matches(Code, traverse(TK_AsIs, M)));
+    EXPECT_FALSE(matches(Code, traverse(TK_IgnoreUnlessSpelledInSource, M)));
+  }
+  {
+    auto M = declStmt(hasSingleDecl(varDecl(matchesName("__range"))));
+    EXPECT_TRUE(matches(Code, traverse(TK_AsIs, M)));
+    EXPECT_FALSE(matches(Code, traverse(TK_IgnoreUnlessSpelledInSource, M)));
+  }
+  {
+    auto M = declStmt(hasSingleDecl(varDecl(matchesName("__begin"))));
+    EXPECT_TRUE(matches(Code, traverse(TK_AsIs, M)));
+    EXPECT_FALSE(matches(Code, traverse(TK_IgnoreUnlessSpelledInSource, M)));
+  }
+  {
+    auto M = declStmt(hasSingleDecl(varDecl(matchesName("__end"))));
+    EXPECT_TRUE(matches(Code, traverse(TK_AsIs, M)));
+    EXPECT_FALSE(matches(Code, traverse(TK_IgnoreUnlessSpelledInSource, M)));
   }
 
   Code = R"cpp(
