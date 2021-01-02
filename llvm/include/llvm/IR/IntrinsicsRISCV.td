@@ -518,6 +518,8 @@ let TargetPrefix = "riscv" in {
   defm vssubu : RISCVSaturatingBinaryAAX;
   defm vssub : RISCVSaturatingBinaryAAX;
 
+  def int_riscv_vmerge : RISCVBinaryWithV0;
+
   def int_riscv_vmv_v_v : Intrinsic<[llvm_anyvector_ty],
                                     [LLVMMatchType<0>, llvm_anyint_ty],
                                     [IntrNoMem]>, RISCVVIntrinsic;
@@ -526,6 +528,9 @@ let TargetPrefix = "riscv" in {
                                     [IntrNoMem]>, RISCVVIntrinsic {
     let ExtendOperand = 1;
   }
+  def int_riscv_vfmv_v_f : Intrinsic<[llvm_anyfloat_ty],
+                                     [LLVMVectorElementType<0>, llvm_anyint_ty],
+                                     [IntrNoMem]>, RISCVVIntrinsic;
 
   def int_riscv_vmv_x_s : Intrinsic<[LLVMVectorElementType<0>],
                                     [llvm_anyint_ty],
@@ -560,9 +565,19 @@ let TargetPrefix = "riscv" in {
   defm vfmsub : RISCVTernaryAAXA;
   defm vfnmsub : RISCVTernaryAAXA;
 
+  defm vfwmacc : RISCVTernaryWide;
+  defm vfwnmacc : RISCVTernaryWide;
+  defm vfwmsac : RISCVTernaryWide;
+  defm vfwnmsac : RISCVTernaryWide;
+
+  defm vfmin : RISCVBinaryAAX;
+  defm vfmax : RISCVBinaryAAX;
+
   defm vfsgnj : RISCVBinaryAAX;
   defm vfsgnjn : RISCVBinaryAAX;
   defm vfsgnjx : RISCVBinaryAAX;
+
+  defm vfmerge : RISCVBinaryWithV0;
 
   defm vslideup : RISCVTernaryAAAX;
   defm vslidedown : RISCVTernaryAAAX;
