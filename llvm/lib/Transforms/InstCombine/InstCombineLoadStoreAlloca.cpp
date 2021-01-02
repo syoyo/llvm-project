@@ -273,12 +273,7 @@ bool PointerReplacer::collectUsers(Instruction &I) {
   return true;
 }
 
-Value *PointerReplacer::getReplacement(Value *V) {
-  auto Loc = WorkMap.find(V);
-  if (Loc != WorkMap.end())
-    return Loc->second;
-  return nullptr;
-}
+Value *PointerReplacer::getReplacement(Value *V) { return WorkMap.lookup(V); }
 
 void PointerReplacer::replace(Instruction *I) {
   if (getReplacement(I))
@@ -903,14 +898,28 @@ static Instruction *replaceGEPIdxWithZero(InstCombinerImpl &IC, Value *Ptr,
 }
 
 static bool canSimplifyNullStoreOrGEP(StoreInst &SI) {
-  return isa<ConstantPointerNull>(SI.getPointerOperand()) &&
-         !NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace());
+  if (NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace()))
+    return false;
+
+  auto *Ptr = SI.getPointerOperand();
+  if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Ptr))
+    Ptr = GEPI->getOperand(0);
+  return (isa<ConstantPointerNull>(Ptr) &&
+          !NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace()));
 }
 
 static bool canSimplifyNullLoadOrGEP(LoadInst &LI, Value *Op) {
-  return isa<UndefValue>(Op) ||
-         (isa<ConstantPointerNull>(Op) &&
-          !NullPointerIsDefined(LI.getFunction(), LI.getPointerAddressSpace()));
+  if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Op)) {
+    const Value *GEPI0 = GEPI->getOperand(0);
+    if (isa<ConstantPointerNull>(GEPI0) &&
+        !NullPointerIsDefined(LI.getFunction(), GEPI->getPointerAddressSpace()))
+      return true;
+  }
+  if (isa<UndefValue>(Op) ||
+      (isa<ConstantPointerNull>(Op) &&
+       !NullPointerIsDefined(LI.getFunction(), LI.getPointerAddressSpace())))
+    return true;
+  return false;
 }
 
 Instruction *InstCombinerImpl::visitLoadInst(LoadInst &LI) {
@@ -1106,6 +1115,10 @@ static bool combineStoreToValueType(InstCombinerImpl &IC, StoreInst &SI) {
   // Fold away bit casts of the stored value by storing the original type.
   if (auto *BC = dyn_cast<BitCastInst>(V)) {
     V = BC->getOperand(0);
+    // Don't transform when the type is x86_amx, it make the pass that lower
+    // x86_amx type happy.
+    if (BC->getType()->isX86_AMXTy() || V->getType()->isX86_AMXTy())
+      return false;
     if (!SI.isAtomic() || isSupportedAtomicType(V->getType())) {
       combineStoreToNewValue(IC, SI, V);
       return true;
